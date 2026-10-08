@@ -1,0 +1,55 @@
+{
+  "best": {
+    "id": 81836,
+    "title": "로마 위드 러브",
+    "poster_url": "https://image.tmdb.org/t/p/w300/eODC4LlYlyqs8HcRdIHGDYFuiQV.jpg",
+    "director": "우디 앨런",
+    "cast": "우디 앨런, 로베르토 베니니, 페넬로페 크루스, 알렉 볼드윈, 주디 데이비스",
+    "year": 2012,
+    "final_score": 8.5,
+    "scores": { "technical": 8.5, "narrative": 8.5, "public": 8.5 },
+    "reasons": {
+      "technical": "로마의 풍경을 유머와 감성으로 담아낸 연출과 영상미가 돋보인다.",
+      "narrative": "여러 인물의 이야기가 얽히는 구조로 따뜻함과 로맨스, 유머가 조화를 이룬다.",
+      "public": "가볍게 즐기기 좋은 로맨틱 코미디라 폭넓은 관객에게 무난하게 다가간다."
+    },
+    "weights": { "technical": 0.35, "narrative": 0.35, "public": 0.3 },
+    "editor_comment": "따뜻하고 로맨틱하고 웃긴 영화를 원하는 요청에 가장 잘 맞는 작품입니다."
+  },
+  "others": [
+    {
+      "id": 11104,
+      "title": "중경삼림",
+      "poster_url": "",
+      "director": "왕가위",
+      "cast": "임청하, 금성무, 양조위, 왕페이",
+      "year": 1994,
+      "final_score": 8.05,
+      "scores": { "technical": 8.5, "narrative": 8.5, "public": 7.0 },
+      "reasons": {
+        "technical": "도시의 고독과 로맨스를 감각적으로 연출했다.",
+        "narrative": "교차하는 인물들의 감정선이 섬세하다.",
+        "public": "평점은 높지만 템포가 느려 취향이 갈릴 수 있다."
+      },
+      "weights": { "technical": 0.35, "narrative": 0.35, "public": 0.3 },
+      "editor_comment": ""
+    },
+    {
+      "id": 18438,
+      "title": "김씨 표류기",
+      "poster_url": "",
+      "director": "이해준",
+      "cast": "정재영, 정려원",
+      "year": 2009,
+      "final_score": 7.97,
+      "scores": { "technical": 7.0, "narrative": 8.5, "public": 8.5 },
+      "reasons": {
+        "technical": "한강 밤섬을 활용한 영상미가 인상적이다.",
+        "narrative": "고립된 두 인물이 서로에게 희망을 얻는 과정이 따뜻하다.",
+        "public": "독특한 설정과 메시지로 관객 반응이 좋다."
+      },
+      "weights": { "technical": 0.35, "narrative": 0.35, "public": 0.3 },
+      "editor_comment": ""
+    }
+  ]
+}
