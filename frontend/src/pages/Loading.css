@@ -1,0 +1,325 @@
+/* =========================================
+   Loading — 클래스명은 모두 loading- 접두사
+   색상/폰트는 메인 화면 CSS 기준
+   배경 #faf9f6 / 글자 #151515 / 포인트 #36b6d5
+   에이전트 색: 파랑 #36b4d0 / 청록 #47b9ad / 주황 #ef9b67
+   (폰트 import는 메인 화면 CSS에 이미 있음)
+========================================= */
+
+.loading-page,
+.loading-page * {
+  box-sizing: border-box;
+}
+
+.loading-page {
+  min-height: 100vh;
+  padding: 64px 20px 80px;
+
+  background: #faf9f6;
+  color: #151515;
+  font-family: "Noto Sans KR", sans-serif;
+}
+
+.loading-container {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* ---------- 상단 제목 ---------- */
+
+.loading-heading {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.loading-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+
+  color: #35afd0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+
+  margin-bottom: 18px;
+}
+
+.loading-eyebrow::before,
+.loading-eyebrow::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #36b6d5;
+}
+
+.loading-eyebrow::before {
+  opacity: 0.4;
+}
+
+.loading-title {
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -1.5px;
+
+  margin-bottom: 14px;
+}
+
+.loading-subtitle {
+  color: #8c8b88;
+  font-size: 14px;
+  letter-spacing: -0.3px;
+}
+
+/* ---------- 에이전트 카드 ---------- */
+
+.loading-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 카드별 색상 변수 */
+.loading-card-technical {
+  --accent: #36b4d0;
+  --accent-soft: #e1f7fa;
+}
+
+.loading-card-narrative {
+  --accent: #47b9ad;
+  --accent-soft: #e2f5f2;
+}
+
+.loading-card-public {
+  --accent: #ef9b67;
+  --accent-soft: #fff0e7;
+}
+
+.loading-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, white);
+  border-radius: 20px;
+
+  padding: 20px 24px 22px;
+
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.05);
+  transition: 0.4s;
+}
+
+/* 평가가 끝난 카드: 테두리와 배경이 해당 색으로 강조됨 */
+.loading-card.is-done {
+  border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, white);
+}
+
+.loading-card-top {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.loading-icon {
+  width: 44px;
+  height: 44px;
+
+  border-radius: 13px;
+  background: var(--accent-soft);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin-right: 13px;
+  font-size: 20px;
+}
+
+.loading-info {
+  flex: 1;
+}
+
+.loading-agent-name {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.loading-status {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 카드 오른쪽: 평가 중 스피너 / 완료 체크 */
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+
+  border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--accent) 25%, white);
+  border-top-color: var(--accent);
+
+  animation: loading-spin 0.9s linear infinite;
+}
+
+.loading-check {
+  width: 26px;
+  height: 26px;
+
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 14px;
+  font-weight: 700;
+
+  animation: loading-pop 0.35s ease-out;
+}
+
+/* ---------- 단계 목록 ---------- */
+
+.loading-steps {
+  list-style: none;
+  margin-bottom: 16px;
+}
+
+.loading-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 3px 0;
+
+  animation: loading-fade-in 0.35s ease-out;
+}
+
+.loading-step.is-done {
+  color: #9a9a97;
+}
+
+.loading-step.is-active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.loading-step-mark {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loading-step.is-done .loading-step-mark {
+  color: var(--accent);
+}
+
+.loading-step-spinner {
+  width: 12px;
+  height: 12px;
+
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, white);
+  border-top-color: var(--accent);
+
+  animation: loading-spin 0.9s linear infinite;
+}
+
+/* ---------- 진행 바 ---------- */
+
+.loading-bar {
+  width: 100%;
+  height: 4px;
+
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 20%, white);
+
+  overflow: hidden;
+}
+
+.loading-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+
+  transition: width 0.6s ease;
+}
+
+/* ---------- 하단 문구 ---------- */
+
+.loading-footer {
+  text-align: center;
+  color: #92928f;
+  font-size: 12px;
+
+  margin-top: 32px;
+}
+
+/* ---------- 애니메이션 ---------- */
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loading-pop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes loading-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 움직임을 줄이도록 설정한 사용자 */
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner,
+  .loading-step-spinner,
+  .loading-check,
+  .loading-step {
+    animation: none;
+  }
+}
+
+/* ---------- 모바일 ---------- */
+
+@media (max-width: 600px) {
+  .loading-page {
+    padding: 40px 16px 60px;
+  }
+
+  .loading-title {
+    font-size: 30px;
+  }
+
+  .loading-card {
+    padding: 18px 18px 20px;
+  }
+}
