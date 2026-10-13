@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./Input.css";
 
 // label: 화면에 보이는 이름 / value: 백엔드(OTT_MAP, GENRE_MAP)에서 쓰는 키
@@ -36,7 +37,8 @@ const RUNTIME_MIN = 0;
 const RUNTIME_MAX = 180;
 const RUNTIME_STEP = 10;
 
-export default function Input({ onSubmit }) {
+export default function Input({ onSubmit, setFilters }) {
+  const navigate = useNavigate();
   const [ott, setOtt] = useState([]);
   const [genres, setGenres] = useState([]);
   const [media, setMedia] = useState([]);
@@ -52,14 +54,23 @@ export default function Input({ onSubmit }) {
 
   const handleSubmit = () => {
     const payload = {
-      ott, // 예: ["넷플릭스", "웨이브"]  (빈 배열 = 전체)
-      genres, // 예: ["로맨스", "코미디"]  (빈 배열 = 전체)
-      media, // 예: ["movie", "animation"]  (빈 배열 = 전체)
-      runtime, // 분 단위 숫자
+      ott,
+      genres,
+      media,
+      runtime,
       query: query.trim(),
     };
-    if (onSubmit) onSubmit(payload);
-  };
+
+    if (setFilters) {
+      setFilters(payload);
+    }
+
+    if (onSubmit) {
+      onSubmit(payload);
+    }
+
+    navigate("/loading");
+    };
 
   return (
     <div className="input-page">
