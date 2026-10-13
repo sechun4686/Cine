@@ -20,11 +20,12 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "https://cine-agent-eight.vercel.app",
     ],
+    allow_origin_regex=r"^https://cine-agent-eight\.vercel\.app$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 
