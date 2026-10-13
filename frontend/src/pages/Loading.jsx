@@ -1,9 +1,10 @@
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Loading.css";
-// 에이전트 이름/단계 문구는 여기만 고치면 화면에 반영돼요.
-// steps: [진행 중일 때 문구, 끝났을 때 문구]
-// speed: 한 단계가 끝나는 데 걸리는 시간(ms) — 에이전트마다 다르게 해서 각자 평가 중인 느낌을 줌
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
 const AGENTS = [
   {
     id: "technical",
@@ -45,53 +46,142 @@ const AGENTS = [
   },
 ];
 
-export default function Loading({ onComplete }) {
+export default function Loading({
+  filters,
+  setResult,
+  onComplete,
+}) {
   const navigate = useNavigate();
-  // 에이전트별로 "끝난 단계 수" (0이면 1단계 진행 중)
-  const [completed, setCompleted] = useState(() =>
-    Object.fromEntries(AGENTS.map((a) => [a.id, 0]))
-  );
 
-  // 에이전트마다 자기 속도로 단계를 하나씩 완료 처리
+  const [completed, setCompleted] = useState(() =>
+    Object.fromEntries(AGENTS.map((agent) => [agent.id, 0]))
+  );
+  const [requestError, setRequestError] = useState("");
+  const [resultReady, setResultReady] = useState(false);
+
+  // 백엔드에 실제 추천 요청
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function fetchRecommendation() {
+      try {
+        setRequestError("");
+        setResultReady(false);
+
+        if (!filters || typeof setResult !== "function") {
+          throw new Error(
+            "추천 입력값을 찾을 수 없습니다. 입력 페이지부터 다시 진행해 주세요."
+          );
+        }
+
+        const payload = {
+          ...filters,
+          ott: Array.isArray(filters.ott) ? filters.ott : [],
+          genres: Array.isArray(filters.genres) ? filters.genres : [],
+          media: Array.isArray(filters.media)
+            ? filters.media
+            : filters.media
+              ? [filters.media]
+              : [],
+          runtime: Number(filters.runtime ?? 120),
+          query: filters.query ?? "",
+        };
+
+        const response = await fetch(`${API_BASE_URL}/api/recommend`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(
+            typeof data.detail === "string"
+              ? data.detail
+              : `추천 API 오류 (${response.status})`
+          );
+        }
+
+        if (!data.best) {
+          throw new Error(
+            "추천 결과 형식이 예상과 다릅니다. 백엔드 응답을 확인해 주세요."
+          );
+        }
+
+        setResult(data);
+        setResultReady(true);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+
+        console.error("추천 API 호출 실패:", error);
+        setRequestError(
+          error.message || "서버에 연결하지 못했습니다."
+        );
+      }
+    }
+
+    fetchRecommendation();
+
+    return () => controller.abort();
+  }, [filters, setResult]);
+
+  // 기존 로딩 애니메이션 유지
   useEffect(() => {
     const timers = AGENTS.map((agent) =>
       setInterval(() => {
-        setCompleted((prev) => {
-          if (prev[agent.id] >= agent.steps.length) return prev;
-          return { ...prev, [agent.id]: prev[agent.id] + 1 };
+        setCompleted((previous) => {
+          if (previous[agent.id] >= agent.steps.length) {
+            return previous;
+          }
+
+          return {
+            ...previous,
+            [agent.id]: previous[agent.id] + 1,
+          };
         });
       }, agent.speed)
     );
+
     return () => timers.forEach(clearInterval);
   }, []);
 
-  const allDone = AGENTS.every((a) => completed[a.id] >= a.steps.length);
+  const allDone = AGENTS.every(
+    (agent) => completed[agent.id] >= agent.steps.length
+  );
 
-  // 3개 에이전트가 모두 끝나면 잠깐 보여준 뒤 다음 화면으로 이동
-  // (나중에 실제 API 응답을 연결하면, 응답이 왔을 때 onComplete를 호출하도록 바꾸면 됨)
-  
+  // 애니메이션과 실제 추천 요청이 모두 끝나야 이동
   useEffect(() => {
-    if (!allDone) return;
+    if (!allDone || !resultReady || requestError) return;
 
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       if (onComplete) {
         onComplete();
       } else {
         navigate("/result");
       }
-    }, 1000);
+    }, 700);
 
-    return () => clearTimeout(t);
-  }, [allDone, onComplete, navigate]);
+    return () => clearTimeout(timer);
+  }, [allDone, resultReady, requestError, onComplete, navigate]);
 
   return (
     <div className="loading-page">
       <div className="loading-container">
         <header className="loading-heading">
           <p className="loading-eyebrow">ANALYZING</p>
-          <h1 className="loading-title">에이전트가 분석 중입니다</h1>
+          <h1 className="loading-title">
+            {requestError
+              ? "추천을 완료하지 못했어요"
+              : "에이전트가 분석 중입니다"}
+          </h1>
           <p className="loading-subtitle">
-            3개의 AI 에이전트가 각자의 관점에서 작품을 평가하고 있습니다
+            {requestError
+              ? "아래 오류를 확인하고 다시 시도해 주세요."
+              : "3개의 AI 에이전트가 각자의 관점에서 작품을 평가하고 있습니다"}
           </p>
         </header>
 
@@ -100,9 +190,10 @@ export default function Loading({ onComplete }) {
             const total = agent.steps.length;
             const doneCount = completed[agent.id];
             const done = doneCount >= total;
-            // 끝난 단계 + 지금 진행 중인 단계 1개까지만 보여줌
             const visibleCount = done ? total : doneCount + 1;
-            const progress = done ? 100 : ((doneCount + 0.5) / total) * 100;
+            const progress = done
+              ? 100
+              : ((doneCount + 0.5) / total) * 100;
 
             return (
               <section
@@ -119,6 +210,7 @@ export default function Loading({ onComplete }) {
                       {done ? "평가 완료" : `${agent.desc} 중`}
                     </p>
                   </div>
+
                   {done ? (
                     <span className="loading-check" aria-label="평가 완료">
                       ✓
@@ -129,24 +221,29 @@ export default function Loading({ onComplete }) {
                 </div>
 
                 <ul className="loading-steps">
-                  {agent.steps.slice(0, visibleCount).map(([doing, finished], i) => {
-                    const stepDone = i < doneCount;
-                    return (
-                      <li
-                        key={doing}
-                        className={`loading-step ${stepDone ? "is-done" : "is-active"}`}
-                      >
-                        <span className="loading-step-mark">
-                          {stepDone ? (
-                            "✓"
-                          ) : (
-                            <span className="loading-step-spinner" />
-                          )}
-                        </span>
-                        {stepDone ? finished : doing}
-                      </li>
-                    );
-                  })}
+                  {agent.steps
+                    .slice(0, visibleCount)
+                    .map(([doing, finished], index) => {
+                      const stepDone = index < doneCount;
+
+                      return (
+                        <li
+                          key={doing}
+                          className={`loading-step ${
+                            stepDone ? "is-done" : "is-active"
+                          }`}
+                        >
+                          <span className="loading-step-mark">
+                            {stepDone ? (
+                              "✓"
+                            ) : (
+                              <span className="loading-step-spinner" />
+                            )}
+                          </span>
+                          {stepDone ? finished : doing}
+                        </li>
+                      );
+                    })}
                 </ul>
 
                 <div className="loading-bar">
@@ -160,10 +257,23 @@ export default function Loading({ onComplete }) {
           })}
         </div>
 
-        <p className="loading-footer">
-          잠깐만 기다려 주세요. 최적의 콘텐츠를 찾고 있습니다.
-        </p>
+        {requestError ? (
+          <div className="loading-footer" role="alert">
+            <p>추천에 실패했어요: {requestError}</p>
+            <button
+              type="button"
+              onClick={() => navigate("/input")}
+            >
+              입력 조건 다시 선택하기
+            </button>
+          </div>
+        ) : (
+          <p className="loading-footer">
+            잠깐만 기다려 주세요. 최적의 콘텐츠를 찾고 있습니다.
+          </p>
+        )}
       </div>
     </div>
   );
 }
+
