@@ -722,6 +722,7 @@ body {
 }
 
 .movie-info h2 {
+  color: #ffffff;
   margin: 32px 0 6px;
   font-size: clamp(28px, 3vw, 42px);
   font-weight: 500;
