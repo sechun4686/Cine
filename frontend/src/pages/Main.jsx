@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import "../Main.css";
+import "../main.css";
 
 function AgentCard({ icon, title, subtitle, score, className }) {
   return (
