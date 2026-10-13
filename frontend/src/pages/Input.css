@@ -1,0 +1,278 @@
+/* =========================================
+   InputPage — 클래스명은 모두 input- 접두사
+   색상/폰트는 메인 화면 CSS 기준
+   배경 #faf9f6 / 글자 #151515 / 포인트 #36b6d5
+   청록 #52c6bd / 버튼 #171719 / 연한 포인트 배경 #e3f7fb
+   (폰트 import는 메인 화면 CSS에 이미 있음)
+========================================= */
+
+.input-page,
+.input-page * {
+  box-sizing: border-box;
+}
+
+.input-page {
+  min-height: 100vh;
+  padding: 56px 20px 80px;
+
+  background: #faf9f6;
+  color: #151515;
+  font-family: "Noto Sans KR", sans-serif;
+}
+
+.input-container {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* ---------- 상단 제목 ---------- */
+
+.input-heading {
+  margin-bottom: 36px;
+}
+
+.input-eyebrow {
+  color: #35afd0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+
+  margin-bottom: 14px;
+}
+
+.input-title {
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -1.5px;
+
+  margin-bottom: 12px;
+}
+
+.input-subtitle {
+  color: #8c8b88;
+  font-size: 14px;
+  letter-spacing: -0.3px;
+}
+
+/* ---------- 카드 ---------- */
+
+.input-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(93, 197, 201, 0.28);
+  border-radius: 20px;
+
+  padding: 22px 24px 24px;
+  margin-bottom: 16px;
+
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.04);
+}
+
+.input-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.input-card-desc {
+  color: #8d8d8d;
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+/* ---------- 선택 칩 ---------- */
+
+.input-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.input-chip {
+  height: 40px;
+  padding: 0 18px;
+
+  border: 1px solid rgba(93, 197, 201, 0.4);
+  border-radius: 12px;
+
+  background: #fff;
+  color: #5f5f5c;
+
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.input-chip:hover {
+  border-color: #36b6d5;
+  color: #151515;
+}
+
+.input-chip.is-selected {
+  background: #e3f7fb;
+  border-color: #36b6d5;
+  color: #1f95b3;
+  font-weight: 700;
+}
+
+.input-chip:focus-visible,
+.input-submit:focus-visible,
+.input-textarea:focus-visible,
+.input-slider:focus-visible {
+  outline: 2px solid #36b6d5;
+  outline-offset: 2px;
+}
+
+/* ---------- 슬라이더 ---------- */
+
+.input-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.input-slider {
+  flex: 1;
+  height: 6px;
+
+  -webkit-appearance: none;
+  appearance: none;
+
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #36b6d5 0%,
+    #36b6d5 var(--fill, 50%),
+    #d8eef2 var(--fill, 50%),
+    #d8eef2 100%
+  );
+
+  cursor: pointer;
+}
+
+.input-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+
+  width: 20px;
+  height: 20px;
+
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: #36b6d5;
+
+  box-shadow: 0 0 0 1px rgba(54, 182, 213, 0.5), 0 3px 8px rgba(0, 0, 0, 0.12);
+}
+
+.input-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: #36b6d5;
+
+  box-shadow: 0 0 0 1px rgba(54, 182, 213, 0.5), 0 3px 8px rgba(0, 0, 0, 0.12);
+}
+
+.input-slider-value {
+  min-width: 52px;
+  text-align: right;
+
+  color: #36b6d5;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.input-slider-scale {
+  display: flex;
+  justify-content: space-between;
+
+  margin-top: 10px;
+  padding-right: 70px; /* 슬라이더 폭에 맞추려고 값 표시 영역만큼 띄움 */
+
+  color: #92928f;
+  font-size: 11px;
+}
+
+/* ---------- 텍스트 입력 ---------- */
+
+.input-textarea {
+  width: 100%;
+  height: 110px;
+  resize: none;
+
+  padding: 14px 16px;
+
+  border: 1px solid rgba(93, 197, 201, 0.4);
+  border-radius: 14px;
+
+  background: #fff;
+  color: #151515;
+
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.input-textarea::placeholder {
+  color: #b3b2ae;
+}
+
+/* ---------- 시작 버튼 ---------- */
+
+.input-submit {
+  width: 100%;
+  height: 62px;
+
+  margin-top: 12px;
+
+  border: none;
+  border-radius: 16px;
+
+  background: #171719;
+  color: #fff;
+
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+  transition: 0.25s;
+}
+
+.input-submit span {
+  font-size: 20px;
+}
+
+.input-submit:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 17px 35px rgba(0, 0, 0, 0.16);
+}
+
+/* ---------- 모바일 ---------- */
+
+@media (max-width: 600px) {
+  .input-page {
+    padding: 36px 16px 60px;
+  }
+
+  .input-title {
+    font-size: 30px;
+  }
+
+  .input-card {
+    padding: 18px 18px 20px;
+  }
+}
