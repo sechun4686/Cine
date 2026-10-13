@@ -26,7 +26,7 @@ function Main() {
       <header className="header">
         <div className="logo">
           <div className="logo-icon">✦</div>
-          <span>ScenePick</span>
+          <span>Cine Agent</span>
         </div>
 
         <div className="status">

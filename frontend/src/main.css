@@ -1,201 +1,242 @@
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 
 * {
   box-sizing: border-box;
+}
+
+html,
+body,
+#root {
   margin: 0;
-  padding: 0;
+  min-width: 1300px;
+  min-height: 100%;
 }
 
 body {
-  font-family: "Noto Sans KR", sans-serif;
+  font-family: 'Noto Sans KR', sans-serif;
   background: #faf9f6;
-  color: #151515;
+  color: #111;
 }
 
 .app {
-  min-height: 100vh;
   position: relative;
+  min-width: 1300px;
+  min-height: 100vh;
   overflow: hidden;
   background: #faf9f6;
 }
 
+
 /* =========================
-   HEADER
+   Header
 ========================= */
 
 .header {
-  height: 90px;
-  padding: 0 6.5vw;
-
+  height: 110px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 
+  padding: 0 9%;
   position: relative;
-  z-index: 10;
+  z-index: 20;
 }
 
 .logo {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 16px;
 
-  font-size: 24px;
+  font-size: 29px;
   font-weight: 700;
-  letter-spacing: -0.7px;
+  letter-spacing: -1.5px;
 }
 
 .logo-icon {
-  width: 43px;
-  height: 43px;
-
-  border-radius: 13px;
-
-  background: #18181a;
-  color: white;
+  width: 54px;
+  height: 54px;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  font-size: 22px;
+  border-radius: 16px;
+  background: #151515;
+  color: white;
+
+  font-size: 25px;
 }
 
 .status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
 
-  color: #858585;
-  font-size: 14px;
+  color: #777;
+  font-size: 15px;
+  font-weight: 400;
 }
 
 .status-dot {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 
   border-radius: 50%;
-  background: #52c6bd;
+  background: #50c5b8;
 
-  box-shadow: 0 0 0 5px rgba(82, 198, 189, 0.1);
+  box-shadow: 0 0 0 6px rgba(80, 197, 184, 0.12);
 }
 
 
 /* =========================
-   HERO
+   Main
 ========================= */
 
 .hero {
-  min-height: calc(100vh - 90px);
+  display: grid;
 
-  display: flex;
+  /*
+    왼쪽을 넓게 확보해서
+    "무엇을 볼지 고민되나요?"가
+    오른쪽까지 길게 뻗도록 함
+  */
+  grid-template-columns: 56% 44%;
+
   align-items: center;
 
-  padding: 0 7vw 5vh;
+  min-width: 1300px;
+  min-height: calc(100vh - 110px);
 
   position: relative;
 }
 
 
 /* =========================
-   LEFT
+   Left
 ========================= */
 
 .hero-left {
-  width: 50%;
   position: relative;
-  z-index: 5;
+  z-index: 10;
+
+  width: 100%;
+  padding-left: 11%;
 }
+
+
+/* 작은 제목 */
 
 .eyebrow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 13px;
 
   color: #35afd0;
 
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-
   letter-spacing: 2px;
-
-  margin-bottom: 42px;
 }
 
 .eyebrow span {
-  width: 30px;
-  height: 30px;
-
-  border-radius: 50%;
-
-  background: #e3f7fb;
+  width: 34px;
+  height: 34px;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  font-size: 14px;
+  border-radius: 50%;
+
+  background: #e5f8fc;
+  color: #35afd0;
+
+  font-size: 15px;
 }
 
-h1 {
-  font-size: clamp(54px, 5vw, 78px);
-  font-weight: 500;
 
-  line-height: 1.18;
+/* =========================
+   Main Title
+========================= */
+
+.hero-left h1 {
+  margin: 60px 0 35px;
+
+  font-size: 72px;
+  line-height: 1.1;
+
+  font-weight: 500;
   letter-spacing: -5px;
 
-  margin-bottom: 42px;
+  /*
+    핵심:
+    제목이 오른쪽으로 길게 이어지게 함
+  */
+  white-space: nowrap;
 }
 
-h1 span {
-  color: #36b6d5;
+.hero-left h1 span {
+  color: #35afd0;
 
   position: relative;
+  display: inline-block;
 }
 
-h1 span::after {
+
+/*
+  "무엇을 볼지" 밑줄
+*/
+
+.hero-left h1 span::after {
   content: "";
 
   position: absolute;
 
   left: 0;
-  bottom: -8px;
+  right: 0;
 
-  width: 100%;
-  height: 3px;
+  bottom: -7px;
 
-  background: #36b6d5;
-}
+  height: 2px;
 
-.description {
-  color: #8c8b88;
-
-  font-size: 17px;
-  line-height: 2;
-
-  letter-spacing: -0.4px;
-
-  margin-bottom: 38px;
+  background: #35afd0;
 }
 
 
 /* =========================
-   BUTTON
+   Description
+========================= */
+
+.description {
+  margin: 0;
+
+  color: #777;
+
+  font-size: 17px;
+  line-height: 1.9;
+
+  letter-spacing: -0.5px;
+}
+
+
+/* =========================
+   Button
 ========================= */
 
 .start-button {
-  width: 240px;
+  margin-top: 36px;
+
+  width: 290px;
   height: 62px;
 
   border: none;
-  border-radius: 16px;
+  border-radius: 18px;
 
-  background: #171719;
+  background: #151515;
   color: white;
 
   font-family: inherit;
-
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
 
   cursor: pointer;
@@ -203,343 +244,388 @@ h1 span::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 22px;
+  gap: 30px;
 
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.12);
 
-  transition: 0.25s;
-}
-
-.start-button span {
-  font-size: 22px;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .start-button:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 17px 35px rgba(0, 0, 0, 0.16);
+  transform: translateY(-2px);
+
+  box-shadow: 0 18px 35px rgba(0, 0, 0, 0.16);
+}
+
+.start-button span {
+  font-size: 27px;
+  font-weight: 400;
 }
 
 
 /* =========================
-   FEATURES
+   Features
 ========================= */
 
 .features {
   display: flex;
-  gap: 28px;
+  gap: 30px;
 
   margin-top: 25px;
 
-  color: #92928f;
-  font-size: 13px;
+  color: #888;
+
+  font-size: 14px;
+}
+
+.features div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .features span {
-  color: #45b9ad;
-  margin-right: 7px;
+  color: #39b8b0;
+  font-size: 16px;
 }
 
 
 /* =========================
-   RIGHT VISUAL
+   Right Visual
 ========================= */
 
 .visual {
-  width: 50%;
-  height: 650px;
-
   position: relative;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  height: 650px;
+
+  z-index: 1;
 }
 
 
-/* Background glow */
+/* =========================
+   Background Glow
+========================= */
 
 .glow {
   position: absolute;
 
-  width: 470px;
-  height: 470px;
+  width: 510px;
+  height: 510px;
+
+  left: 50%;
+  top: 50%;
+
+  transform: translate(-50%, -50%);
 
   border-radius: 50%;
 
-  background: rgba(203, 237, 233, 0.5);
+  background: rgba(110, 214, 204, 0.13);
 
-  filter: blur(1px);
+  filter: blur(2px);
 }
 
 
-/* circles */
+/* =========================
+   Circles
+========================= */
 
 .circle {
   position: absolute;
 
+  left: 50%;
+  top: 50%;
+
+  transform: translate(-50%, -50%);
+
   border-radius: 50%;
 
-  border: 1px solid rgba(93, 197, 201, 0.25);
+  border: 1px solid rgba(80, 195, 205, 0.18);
 }
 
 .circle-1 {
-  width: 440px;
-  height: 440px;
+  width: 430px;
+  height: 430px;
 }
 
 .circle-2 {
-  width: 540px;
-  height: 540px;
+  width: 590px;
+  height: 590px;
 }
 
 .circle-3 {
-  width: 650px;
-  height: 650px;
-
-  border-color: rgba(93, 197, 201, 0.13);
+  width: 730px;
+  height: 730px;
 }
 
 
 /* =========================
-   CENTER
+   Center
 ========================= */
 
 .center {
-  width: 220px;
-  height: 220px;
+  position: absolute;
+
+  left: 50%;
+  top: 50%;
+
+  transform: translate(-50%, -50%);
+
+  width: 260px;
+  height: 260px;
 
   border-radius: 50%;
 
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.92);
 
   display: flex;
   flex-direction: column;
-
   align-items: center;
   justify-content: center;
 
-  position: relative;
-  z-index: 3;
-
-  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 15px 45px rgba(0, 0, 0, 0.04);
 }
 
 .center-icon {
-  width: 72px;
-  height: 72px;
-
-  border-radius: 21px;
-
-  background: #151517;
-  color: white;
+  width: 78px;
+  height: 78px;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  font-size: 28px;
+  border-radius: 20px;
 
-  margin-bottom: 16px;
+  background: #151515;
+  color: white;
 
-  box-shadow:
-    0 0 0 12px rgba(255,255,255,0.8),
-    0 0 0 13px rgba(82, 198, 189, 0.12);
+  font-size: 29px;
+
+  margin-bottom: 18px;
 }
 
 .center-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
 
-  margin-bottom: 5px;
+  margin-bottom: 8px;
 }
 
 .center-subtitle {
-  font-size: 12px;
   color: #999;
 
+  font-size: 14px;
 }
 
 
 /* =========================
-   AGENT CARDS
+   Agent Cards
 ========================= */
 
 .agent-card {
-  width: 290px;
-  height: 94px;
-
   position: absolute;
 
-  background: rgba(255, 255, 255, 0.92);
+  width: 330px;
+  height: 115px;
 
-  border-radius: 20px;
+  padding: 20px;
 
   display: flex;
   align-items: center;
 
-  padding: 0 20px;
+  border-radius: 20px;
 
-  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.94);
+
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.08);
 
   z-index: 5;
 }
 
-.agent-icon {
-  width: 44px;
-  height: 44px;
 
-  border-radius: 13px;
+/* 아이콘 */
+
+.agent-icon {
+  width: 54px;
+  height: 54px;
+
+  flex-shrink: 0;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  margin-right: 13px;
+  border-radius: 15px;
 
-  font-size: 20px;
+  background: #e5f8fc;
+  color: #35afd0;
+
+  font-size: 22px;
 }
 
+
+/* 카드 내용 */
+
 .agent-info {
-  flex: 1;
+  margin-left: 16px;
+
+  min-width: 0;
 }
 
 .agent-title {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
 
-  margin-bottom: 6px;
+  margin-bottom: 7px;
+
+  white-space: nowrap;
 }
 
 .agent-subtitle {
-  color: #8d8d8d;
+  color: #999;
 
-  font-size: 11px;
+  font-size: 12px;
+
+  white-space: nowrap;
 }
+
+
+/* 점수 */
 
 .agent-score {
+  margin-left: auto;
+
   font-size: 17px;
-  font-weight: 700;
-}
+  font-weight: 600;
 
-
-/* card colors */
-
-.card-cinephile {
-  top: 80px;
-  left: 20px;
-}
-
-.card-cinephile .agent-icon {
-  background: #e1f7fa;
-  color: #36b4d0;
-}
-
-
-.card-popular {
-  top: 120px;
-  right: -10px;
-}
-
-.card-popular .agent-icon {
-  background: #fff0e7;
-  color: #ef9b67;
-}
-
-
-.card-preference {
-  bottom: 70px;
-  left: 180px;
-}
-
-.card-preference .agent-icon {
-  background: #e2f5f2;
-  color: #47b9ad;
+  padding-left: 15px;
 }
 
 
 /* =========================
-   BOTTOM
+   Card Positions
+========================= */
+
+/*
+  시네필:
+  위쪽 왼쪽
+*/
+
+.card-cinephile {
+  top: 40px;
+  left: 10px;
+}
+
+
+/*
+  대중성:
+  시네필보다 아래 + 오른쪽
+  → 서로 겹치지 않음
+*/
+
+.card-popular {
+  top: 155px;
+  right: 5px;
+}
+
+
+/*
+  취향 분석:
+  아래쪽 오른쪽
+*/
+
+.card-preference {
+  bottom: 35px;
+  right: 45px;
+}
+
+
+/* 카드별 아이콘 */
+
+.card-popular .agent-icon {
+  background: #fff0e8;
+  color: #f39b68;
+}
+
+.card-preference .agent-icon {
+  background: #e3f7f3;
+  color: #4dbeb2;
+}
+
+
+/* =========================
+   Bottom Text
 ========================= */
 
 .bottom-text {
   position: absolute;
 
-  bottom: 15px;
   left: 50%;
+  bottom: 28px;
 
   transform: translateX(-50%);
 
-  color: #92928f;
+  color: #999;
 
-  font-size: 12px;
+  font-size: 13px;
+
+  white-space: nowrap;
+
+  z-index: 10;
 }
 
 
 /* =========================
-   RESPONSIVE
+   Responsive
 ========================= */
 
-@media (max-width: 1000px) {
-
-  .hero {
-    flex-direction: column;
-    padding-top: 50px;
-  }
+@media (max-width: 1500px) {
 
   .hero-left {
-    width: 100%;
-    text-align: center;
+    padding-left: 9%;
   }
 
-  .eyebrow {
-    justify-content: center;
+  .hero-left h1 {
+    font-size: 66px;
   }
 
-  .description {
-    font-size: 15px;
+  .agent-card {
+    width: 310px;
   }
 
-  .start-button {
-    margin: auto;
-  }
-
-  .features {
-    justify-content: center;
-  }
-
-  .visual {
-    width: 100%;
-    margin-top: 40px;
-    transform: scale(0.8);
-  }
 }
 
 
-@media (max-width: 600px) {
+@media (max-width: 1300px) {
 
-  .header {
-    padding: 0 20px;
+  html,
+  body,
+  #root,
+  .app,
+  .hero {
+    min-width: 1200px;
   }
 
-  .status {
-    display: none;
+  .hero {
+    grid-template-columns: 55% 45%;
   }
 
-  h1 {
-    font-size: 48px;
-    letter-spacing: -4px;
+  .hero-left {
+    padding-left: 7%;
   }
 
-  .description {
-    font-size: 14px;
+  .hero-left h1 {
+    font-size: 62px;
   }
 
   .visual {
-    transform: scale(0.6);
-    margin-top: -30px;
+    transform: scale(0.92);
+    transform-origin: center;
   }
 
-  .bottom-text {
-    display: none;
-  }
 }
