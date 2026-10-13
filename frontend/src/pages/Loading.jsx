@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./Loading.css";
-
 // 에이전트 이름/단계 문구는 여기만 고치면 화면에 반영돼요.
 // steps: [진행 중일 때 문구, 끝났을 때 문구]
 // speed: 한 단계가 끝나는 데 걸리는 시간(ms) — 에이전트마다 다르게 해서 각자 평가 중인 느낌을 줌
@@ -46,6 +46,7 @@ const AGENTS = [
 ];
 
 export default function Loading({ onComplete }) {
+  const navigate = useNavigate();
   // 에이전트별로 "끝난 단계 수" (0이면 1단계 진행 중)
   const [completed, setCompleted] = useState(() =>
     Object.fromEntries(AGENTS.map((a) => [a.id, 0]))
@@ -68,11 +69,20 @@ export default function Loading({ onComplete }) {
 
   // 3개 에이전트가 모두 끝나면 잠깐 보여준 뒤 다음 화면으로 이동
   // (나중에 실제 API 응답을 연결하면, 응답이 왔을 때 onComplete를 호출하도록 바꾸면 됨)
+  
   useEffect(() => {
-    if (!allDone || !onComplete) return;
-    const t = setTimeout(onComplete, 1000);
+    if (!allDone) return;
+
+    const t = setTimeout(() => {
+      if (onComplete) {
+        onComplete();
+      } else {
+        navigate("/result");
+      }
+    }, 1000);
+
     return () => clearTimeout(t);
-  }, [allDone, onComplete]);
+  }, [allDone, onComplete, navigate]);
 
   return (
     <div className="loading-page">
