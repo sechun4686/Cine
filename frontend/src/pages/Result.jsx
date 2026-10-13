@@ -1,5 +1,4 @@
 
-import mock from '../mock/result.json'
 import {
   RadarChart,
   PolarGrid,
@@ -9,6 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import '../main.css'
 
 const agentInfo = [
@@ -31,6 +31,11 @@ const agentInfo = [
     color: '#F0A16B'
   }
 ]
+
+function toTenPointScore(value) {
+  const score = Number(value ?? 0)
+  return Math.max(0, Math.min(10, score > 10 ? score / 10 : score))
+}
 
 function ScoreTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
@@ -56,15 +61,43 @@ function ScoreTooltip({ active, payload }) {
   )
 }
 
-function Result() {
-  const best = mock.best
+function Result({ result }) {
+  const navigate = useNavigate()
+  const best = result?.best
+  const others = result?.others ?? []
+
+  if (!best) {
+    return (
+      <div className="result-page">
+        <header className="result-header">
+          <div>
+            <span className="result-eyebrow">CINE AGENT</span>
+            <h1>아직 추천 결과가 없어요</h1>
+            <p>먼저 입력 조건을 선택하고 추천을 시작해 주세요.</p>
+          </div>
+        </header>
+        <button type="button" onClick={() => navigate('/input')}>
+          추천 조건 선택하기
+        </button>
+      </div>
+    )
+  }
+
+  const scores = best.scores ?? {}
+  const reasons = best.reasons ?? {}
+  const weights = best.weights ?? result.weights ?? {}
 
   const chartData = agentInfo.map((agent) => ({
     subject: agent.label,
     key: agent.key,
-    score: best.scores[agent.key],
-    reason: best.reasons?.[agent.key] ?? '추천 근거가 없습니다.'
+    score: toTenPointScore(scores[agent.key]),
+    reason: reasons[agent.key] ?? best.reason ?? '추천 근거가 없습니다.'
   }))
+
+  const finalScore = toTenPointScore(best.final_score)
+  const cast = Array.isArray(best.cast)
+    ? best.cast.join(', ')
+    : best.cast || '출연 정보 없음'
 
   return (
     <div className="result-page">
@@ -75,7 +108,7 @@ function Result() {
         </div>
 
         <div className="match-badge">
-          <strong>{best.final_score.toFixed(1)}</strong>
+          <strong>{finalScore.toFixed(1)}</strong>
           <span>FINAL SCORE</span>
         </div>
       </header>
@@ -93,27 +126,25 @@ function Result() {
           <span className="recommend-label">오늘의 최종 추천</span>
           <h2>{best.title}</h2>
           <p className="movie-subtitle">
-            {best.title} · {best.year}
+            {best.title} · {best.year || '개봉 연도 정보 없음'}
           </p>
 
           <div className="movie-meta">
-            <span>★ {best.final_score.toFixed(1)}</span>
-            <span>{best.director}</span>
+            <span>★ {finalScore.toFixed(1)}</span>
+            <span>{best.director || '감독 정보 없음'}</span>
           </div>
 
-          <p className="movie-cast">
-            출연 · {best.cast}
-          </p>
+          <p className="movie-cast">출연 · {cast}</p>
 
           <p className="movie-description">
-            {best.editor_comment}
+            {best.overview || best.editor_comment || best.reason || '작품 정보가 없습니다.'}
           </p>
 
           <div className="editor-comment">
             <span className="comment-icon">✦</span>
             <div>
               <strong>세 에이전트가 함께 고른 이유</strong>
-              <p>{best.editor_comment}</p>
+              <p>{best.editor_comment || best.reason || '입력한 조건과 작품 정보를 바탕으로 선정했습니다.'}</p>
             </div>
           </div>
         </div>
@@ -166,10 +197,7 @@ function Result() {
                     strokeWidth: 2
                   }}
                 />
-                <Tooltip
-                  content={<ScoreTooltip />}
-                  cursor={false}
-                />
+                <Tooltip content={<ScoreTooltip />} cursor={false} />
               </RadarChart>
             </ResponsiveContainer>
           </div>
@@ -183,7 +211,7 @@ function Result() {
                 />
                 <span>{agent.shortLabel}</span>
                 <strong>
-                  {Number(best.scores[agent.key]).toFixed(1)}
+                  {toTenPointScore(scores[agent.key]).toFixed(1)}
                 </strong>
               </div>
             ))}
@@ -198,8 +226,8 @@ function Result() {
           </p>
 
           {agentInfo.map((agent) => {
-            const weight = best.weights[agent.key] ?? 0
-            const score = best.scores[agent.key] ?? 0
+            const weight = Number(weights[agent.key] ?? 0)
+            const score = toTenPointScore(scores[agent.key])
 
             return (
               <div className="weight-item" key={agent.key}>
@@ -225,11 +253,11 @@ function Result() {
                 </div>
 
                 <p className="weight-reason">
-                  {best.reasons?.[agent.key]}
+                  {reasons[agent.key] ?? best.reason ?? '추천 근거 정보 없음'}
                 </p>
 
                 <span className="weight-score">
-                  해당 항목 점수 {Number(score).toFixed(1)} / 10
+                  해당 항목 점수 {score.toFixed(1)} / 10
                 </span>
               </div>
             )
@@ -237,23 +265,26 @@ function Result() {
         </section>
       </div>
 
-      {mock.others?.length > 0 && (
+      {others.length > 0 && (
         <section className="other-movies">
           <div className="panel-eyebrow">MORE PICKS</div>
           <h3>함께 고려한 작품</h3>
 
           <div className="other-movie-list">
-            {mock.others.map((movie) => (
-              <article className="other-movie-card" key={movie.id}>
+            {others.map((movie) => (
+              <article
+                className="other-movie-card"
+                key={`${movie.media_type || 'movie'}-${movie.id}`}
+              >
                 {movie.poster_url ? (
-                  <img src={movie.poster_url} alt="" />
+                  <img src={movie.poster_url} alt={`${movie.title} 포스터`} />
                 ) : (
                   <div className="other-poster-placeholder">CINE</div>
                 )}
                 <div>
                   <strong>{movie.title}</strong>
-                  <p>{movie.year} · {movie.director}</p>
-                  <span>★ {movie.final_score.toFixed(2)}</span>
+                  <p>{movie.year} · {movie.director || '감독 정보 없음'}</p>
+                  <span>★ {toTenPointScore(movie.final_score).toFixed(2)}</span>
                 </div>
               </article>
             ))}
@@ -264,10 +295,7 @@ function Result() {
       <footer className="result-footer">
         <p>이 추천이 마음에 드시나요?</p>
         <span>입력 조건을 바꿔 새로운 작품을 발견해 보세요.</span>
-        <button
-          type="button"
-          onClick={() => window.location.assign('/input')}
-        >
+        <button type="button" onClick={() => navigate('/input')}>
           다시 추천받기 <span>↻</span>
         </button>
       </footer>
@@ -276,3 +304,4 @@ function Result() {
 }
 
 export default Result
+
