@@ -90,6 +90,7 @@ async def fetch_filtered_pool(
     ]
 
     params = {
+        "language": "ko-KR",   # 제목·줄거리를 한국어로 받기 (임베딩 모델이 한국어 전용)
         "sort_by": "popularity.desc",
         "page": 1,
     }
