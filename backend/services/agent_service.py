@@ -8,51 +8,59 @@ Technical / Narrative / Public 에이전트 평가 서비스 (LangGraph StateGra
     START ──┼─> narrative_agent ─┼─> aggregate ─> END
             └─> public_agent ────┘
 
-- 세 에이전트 노드는 같은 State를 읽고 각자 자기 키(technical / narrative / public)만 쓴다.
-- aggregate 노드가 세 점수를 가중합해 final_score를 계산한다.
+각 에이전트 노드 내부 흐름
+    select_tools   : LLM이 허용된 도구 목록 안에서 필요한 데이터를 고른다   (프롬프트: agent_prompts.py)
+    validate_tools : 코드에서 선택 결과를 다시 검증한다                     (agent_tools.py)
+    run_tools      : 선택된 도구만 실행해 데이터를 모은다                   (agent_tools.py)
+    score          : 모은 데이터만 근거로 0~10점과 이유를 생성한다
+
+파일 구성
+    agent_service.py : 그래프, 노드, 점수 계산, evaluate_candidates (이 파일)
+    agent_tools.py   : 도구 정의(TOOL_REGISTRY), 검증, 실행
+    tmdb_details.py  : TMDB 상세정보 조회와 필드 추출
+    agent_prompts.py : 도구 선택 / 평가 프롬프트
+    llm_service.py   : Luxia 호출, JSON 파싱
 
 사용 예 (main.py)
     ranked = await evaluate_candidates(client, candidates, query, weights)
 
-입력 candidate dict에서 사용하는 키 (candidate_service 출력 기준)
-    id, title, overview, year, vote_average, vote_count, popularity, media_type
-평가 전에 attach_details()가 아래 키를 추가한다 (TMDB 상세 API)
-    director, cast, keywords
-
 출력: 각 candidate에 아래 키가 추가되어 final_score 내림차순으로 반환된다
-    technical / narrative / public = {"score": float, "reason": str}
+    director / cast / keywords        : 기존과 동일 (다른 서비스 호환용)
+    technical / narrative / public    = {"score": float, "reason": str}
+    tool_usage = {에이전트: {"tools", "reason", "status", "rejected", "failed", "data"}}
     final_score = float
 """
 
 import asyncio
-import json
-import os
-import re
 from typing import TypedDict
 
 import httpx
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
+from .agent_prompts import build_prompt, build_select_prompt
+from .agent_tools import ToolContext, run_tools, validate_tools
+from .llm_service import call_luxia, extract_json
+from .tmdb_details import attach_details
+
 load_dotenv()  # main.py에서 이미 불러오고 있다면 이 줄은 지워도 된다
 
 # ------------------------------------------------------------------
 # 설정
 # ------------------------------------------------------------------
-TMDB_BASE_URL = "https://api.themoviedb.org/3"
-
-LUXIA_URL = "https://bridge.luxiacloud.com/luxia/v1/chat"
-LUXIA_MODEL = "luxia3-llm-32b-0731"
-
 AGENT_TYPES = ["technical", "narrative", "public"]
 
 # 프로토타입과 동일한 기본 가중치 (35 : 35 : 30)
 DEFAULT_WEIGHTS = {"technical": 0.35, "narrative": 0.35, "public": 0.30}
 
-# 동시에 보낼 Luxia 호출 수 제한 (5개 후보 x 3개 에이전트 = 15회)
+# 동시에 보낼 Luxia 호출 수 제한 (5개 후보 x 3개 에이전트 x 2회 = 30회)
 MAX_CONCURRENT_LLM_CALLS = 6
 
 FAIL_RESULT = {"score": 5.0, "reason": "평가 실패"}
+
+# 도구 선택은 재현성을 위해 낮은 temperature 사용
+SELECT_TEMPERATURE = 0.1
+EVAL_TEMPERATURE = 0.7
 
 
 # ------------------------------------------------------------------
@@ -60,176 +68,45 @@ FAIL_RESULT = {"score": 5.0, "reason": "평가 실패"}
 # ------------------------------------------------------------------
 class EvalState(TypedDict, total=False):
     candidate: dict          # 평가할 후보 1개
+    details: dict            # 후보의 TMDB 상세정보 (credits, keywords, reviews 포함)
     query: str               # 사용자 검색어
     weights: dict | None     # 최종 점수 가중치 (None이면 기본값)
     technical: dict          # {"score", "reason"}
     narrative: dict
     public: dict
+    technical_tools: dict    # 도구 선택/실행 기록
+    narrative_tools: dict
+    public_tools: dict
     final_score: float
 
 
 # ------------------------------------------------------------------
-# TMDB 상세정보 (감독 / 출연진 / 키워드)
+# 도구 선택 (LLM 호출 + 검증)
 # ------------------------------------------------------------------
-async def fetch_details(client: httpx.AsyncClient, candidate: dict) -> dict:
-    """TMDB 상세 API에서 credits, keywords를 함께 받아온다. 실패하면 빈 dict."""
-
-    token = os.getenv("TMDB_API_KEY")
-    if not token:
-        raise ValueError("TMDB_API_KEY 환경변수가 설정되지 않았습니다.")
-
-    media_type = candidate.get("media_type", "movie")
+async def select_tools(
+    client: httpx.AsyncClient,
+    candidate: dict,
+    query: str,
+    agent_type: str,
+    semaphore: asyncio.Semaphore,
+) -> dict:
+    prompt = build_select_prompt(candidate, query, agent_type)
 
     try:
-        response = await client.get(
-            f"{TMDB_BASE_URL}/{media_type}/{candidate['id']}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "accept": "application/json",
-            },
-            params={
-                "language": "ko-KR",
-                "append_to_response": "credits,keywords",
-            },
-        )
-        response.raise_for_status()
-        return response.json()
+        async with semaphore:
+            raw = await call_luxia(
+                client, "너는 데이터 조회 계획을 세우는 AI야.", prompt,
+                temperature=SELECT_TEMPERATURE, max_tokens=200,
+            )
     except Exception as e:
-        print(f"[agent_service] TMDB 상세정보 실패 (id={candidate.get('id')}): {e}")
-        return {}
+        print(f"[agent_service] {agent_type} 도구 선택 오류 ({candidate.get('title')}): {e}")
+        raw = None
 
-
-def extract_director(details: dict, media_type: str) -> str:
-    crew = details.get("credits", {}).get("crew", [])
-    names = [c["name"] for c in crew if c.get("job") == "Director"]
-
-    # 드라마는 crew에 Director가 없는 경우가 많아 제작자(created_by)로 대체
-    if not names and media_type == "tv":
-        names = [p["name"] for p in details.get("created_by", [])]
-
-    return ", ".join(names) if names else "정보 없음"
-
-
-def extract_cast(details: dict, top_n: int = 5) -> str:
-    cast = details.get("credits", {}).get("cast", [])
-    names = [c["name"] for c in cast[:top_n]]
-    return ", ".join(names) if names else "정보 없음"
-
-
-def extract_keywords(details: dict, media_type: str, top_n: int = 8) -> str:
-    block = details.get("keywords", {})
-    # 영화는 keywords.keywords, 드라마는 keywords.results
-    items = block.get("keywords", []) if media_type == "movie" else block.get("results", [])
-    names = [k["name"] for k in items[:top_n]]
-    return ", ".join(names) if names else "정보 없음"
-
-
-async def attach_details(client: httpx.AsyncClient, candidates: list[dict]) -> list[dict]:
-    """후보 전체에 director / cast / keywords를 붙인다. 이미 있는 값은 덮어쓰지 않는다."""
-
-    all_details = await asyncio.gather(*(fetch_details(client, c) for c in candidates))
-
-    for c, details in zip(candidates, all_details):
-        media_type = c.get("media_type", "movie")
-        c.setdefault("director", extract_director(details, media_type))
-        c.setdefault("cast", extract_cast(details))
-        c.setdefault("keywords", extract_keywords(details, media_type))
-
-    return candidates
-
-
-# ------------------------------------------------------------------
-# Luxia LLM 호출
-# ------------------------------------------------------------------
-async def call_luxia(client: httpx.AsyncClient, system_prompt: str, user_prompt: str) -> str:
-    api_key = os.getenv("LUXIA_API_KEY")  # .env의 키 이름이 다르면 여기만 수정
-    if not api_key:
-        raise ValueError("LUXIA_API_KEY 환경변수가 설정되지 않았습니다.")
-
-    response = await client.post(
-        LUXIA_URL,
-        headers={
-            "apikey": api_key,
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": LUXIA_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 500,
-        },
-        timeout=60,
-    )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
-
-
-# ------------------------------------------------------------------
-# 프롬프트 생성
-# ------------------------------------------------------------------
-def _base_info(candidate: dict, query: str) -> str:
-    """세 에이전트 공통 입력"""
-    overview = (candidate.get("overview") or "")[:200]
-    return f"""
-작품 제목: {candidate.get('title', '')}
-줄거리: {overview}
-TMDB 평점: {candidate.get('vote_average', 0)}
-인기도: {float(candidate.get('popularity', 0) or 0):.1f}
-사용자 요청: {query}
-"""
-
-
-def _agent_extra(candidate: dict, agent_type: str) -> str:
-    """에이전트별로 참조하는 필드를 고정한다. (재현성 / 설명가능성 확보)"""
-    if agent_type == "technical":
-        return (
-            f"감독: {candidate.get('director', '정보 없음')}\n"
-            f"주요 출연진: {candidate.get('cast', '정보 없음')}\n"
-        )
-    if agent_type == "narrative":
-        return f"키워드: {candidate.get('keywords', '정보 없음')}\n"
-    if agent_type == "public":
-        return (
-            f"개봉 연도: {candidate.get('year', '정보 없음')}\n"
-            f"투표 수: {candidate.get('vote_count', '정보 없음')}\n"
-        )
-    return ""
-
-
-_ROLE_PROMPTS = {
-    "technical": """너는 영화·드라마 기술적 완성도 평가 전문가야.
-감독 역량, 촬영 기법, 제작 수준, 영상미 관점에서 0~10점으로 평가해줘.
-reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
-- 감독의 연출 스타일과 역량
-- 촬영·영상미의 특징
-- 제작 완성도가 사용자 요청과 어떻게 연결되는지""",
-    "narrative": """너는 영화·드라마 서사 구조 평가 전문가야.
-줄거리, 캐릭터 발전, 감성, 주제 의식 관점에서 0~10점으로 평가해줘.
-reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
-- 서사 구조와 전개 방식
-- 캐릭터의 감성선과 성장
-- 사용자 요청 키워드와 어떻게 맞닿는지
-- 키워드는 한국어로 풀어서 설명할 것""",
-    "public": """너는 대중성 및 트렌드 평가 전문가야.
-관객 반응, TMDB 평점 신뢰도, 인기도, 트렌드 부합 여부를 0~10점으로 평가해줘.
-reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
-- 평점과 관객 반응의 신뢰도
-- 인기도 수준과 그 의미
-- 현재 트렌드나 사용자 요청과의 부합 여부""",
-}
-
-
-def build_prompt(candidate: dict, query: str, agent_type: str) -> str:
-    return (
-        f"{_ROLE_PROMPTS[agent_type]}\n"
-        "절대로 키는 score와 reason 두 개만. 다른 말 하지 마.\n"
-        f"{_base_info(candidate, query)}"
-        f"{_agent_extra(candidate, agent_type)}\n"
-        '출력 형식:\n{"score": 8.5, "reason": "상세 설명 3~4문장"}\n'
-    )
+    plan = validate_tools(agent_type, raw)
+    if plan["status"] != "ok":
+        print(f"[agent_service] {agent_type} 도구 선택 {plan['status']} "
+              f"({candidate.get('title')}) rejected={plan['rejected']} -> {plan['tools']}")
+    return plan
 
 
 # ------------------------------------------------------------------
@@ -237,28 +114,18 @@ def build_prompt(candidate: dict, query: str, agent_type: str) -> str:
 # ------------------------------------------------------------------
 def parse_agent_response(raw: str) -> dict:
     """LLM 응답에서 score / reason을 꺼낸다. 실패하면 FAIL_RESULT."""
-    clean = raw.strip().replace("```json", "").replace("```", "").strip()
-
-    try:
-        result = json.loads(clean)
-    except json.JSONDecodeError:
-        # 앞뒤에 다른 말이 섞인 경우 { ... } 부분만 추출
-        match = re.search(r"\{.*\}", clean, re.DOTALL)
-        if not match:
-            return dict(FAIL_RESULT)
-        try:
-            result = json.loads(match.group())
-        except json.JSONDecodeError:
-            return dict(FAIL_RESULT)
+    result = extract_json(raw)
+    if result is None:
+        return dict(FAIL_RESULT)
 
     # 중첩 구조인 경우 score가 있는 dict를 꺼낸다
-    if isinstance(result, dict) and "score" not in result:
+    if "score" not in result:
         for v in result.values():
             if isinstance(v, dict) and "score" in v:
                 result = v
                 break
 
-    if not isinstance(result, dict) or "score" not in result:
+    if "score" not in result:
         return dict(FAIL_RESULT)
 
     try:
@@ -272,21 +139,19 @@ def parse_agent_response(raw: str) -> dict:
     }
 
 
-# ------------------------------------------------------------------
-# 에이전트 1명 평가 (노드 안에서 호출)
-# ------------------------------------------------------------------
 async def score_candidate(
     client: httpx.AsyncClient,
     candidate: dict,
     query: str,
     agent_type: str,
+    tool_data: dict,
     semaphore: asyncio.Semaphore,
 ) -> dict:
-    prompt = build_prompt(candidate, query, agent_type)
+    prompt = build_prompt(candidate, query, agent_type, tool_data)
 
     try:
         async with semaphore:
-            raw = await call_luxia(client, "너는 영화 평가 AI야.", prompt)
+            raw = await call_luxia(client, "너는 영화 평가 AI야.", prompt, temperature=EVAL_TEMPERATURE)
         return parse_agent_response(raw)
     except Exception as e:
         print(f"[agent_service] {agent_type} 평가 오류 ({candidate.get('title')}): {e}")
@@ -316,15 +181,29 @@ def calculate_final_score(scores: dict, weights: dict | None = None) -> float:
 # ------------------------------------------------------------------
 # LangGraph 구성
 # ------------------------------------------------------------------
-def build_graph(client: httpx.AsyncClient, semaphore: asyncio.Semaphore):
+def build_graph(client: httpx.AsyncClient, semaphore: asyncio.Semaphore, person_cache: dict):
     """에이전트 3개를 병렬 노드로, 점수 계산을 마지막 노드로 하는 그래프를 만든다."""
 
     def make_agent_node(agent_type: str):
         async def agent_node(state: EvalState) -> dict:
-            result = await score_candidate(
-                client, state["candidate"], state["query"], agent_type, semaphore
-            )
-            return {agent_type: result}  # 자기 키만 State에 쓴다
+            candidate = state["candidate"]
+            query = state["query"]
+
+            # 1) 도구 선택 + 2) 검증
+            plan = await select_tools(client, candidate, query, agent_type, semaphore)
+
+            # 3) 도구 실행
+            ctx = ToolContext(client, candidate, state.get("details", {}), person_cache)
+            tool_data, failed = await run_tools(ctx, agent_type, plan["tools"])
+
+            # 4) 평가
+            result = await score_candidate(client, candidate, query, agent_type, tool_data, semaphore)
+
+            # 자기 키만 State에 쓴다
+            return {
+                agent_type: result,
+                f"{agent_type}_tools": {**plan, "failed": failed, "data": tool_data},
+            }
 
         return agent_node
 
@@ -363,16 +242,17 @@ async def evaluate_candidates(
     if not candidates:
         return []
 
-    # 1) 감독 / 출연진 / 키워드 붙이기
-    await attach_details(client, candidates)
+    # 1) TMDB 상세정보 한 번에 받아오기 (도구들이 공유)
+    all_details = await attach_details(client, candidates)
 
     # 2) 후보마다 그래프를 한 번씩 실행 (후보끼리도 병렬)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_CALLS)
-    graph = build_graph(client, semaphore)
+    person_cache: dict = {}
+    graph = build_graph(client, semaphore, person_cache)
 
     final_states = await asyncio.gather(*(
-        graph.ainvoke({"candidate": c, "query": query, "weights": weights})
-        for c in candidates
+        graph.ainvoke({"candidate": c, "details": d, "query": query, "weights": weights})
+        for c, d in zip(candidates, all_details)
     ))
 
     # 3) 그래프 결과를 후보 dict에 붙인다
@@ -380,6 +260,7 @@ async def evaluate_candidates(
         c["technical"] = state["technical"]
         c["narrative"] = state["narrative"]
         c["public"] = state["public"]
+        c["tool_usage"] = {a: state.get(f"{a}_tools", {}) for a in AGENT_TYPES}
         c["final_score"] = state["final_score"]
 
     return sorted(candidates, key=lambda x: x["final_score"], reverse=True)
