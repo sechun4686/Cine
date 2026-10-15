@@ -20,6 +20,9 @@ def build_editor_prompt(
 최종 추천 작품:
 {best.get("title", "제목 정보 없음")}
 
+줄거리:
+{best.get("overview", "")}
+
 Technical 평가:
 점수: {technical.get("score", 0)}
 근거: {technical.get("reason", "")}
