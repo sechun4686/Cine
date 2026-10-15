@@ -93,31 +93,31 @@ function Main() {
           <div className="circle circle-3"></div>
 
 
-          {/* 시네필 에이전트 */}
+          {/* Technical 에이전트 */}
           <AgentCard
             icon="▣"
-            title="시네필 에이전트"
-            subtitle="작품성 · 연출 · 미학"
+            title="Technical Agent"
+            subtitle="영상미 · 연출 · 촬영 기법"
             score="9.2"
             className="card-cinephile"
           />
 
 
-          {/* 대중성 에이전트 */}
+          {/* Narrative 에이전트 */}
           <AgentCard
             icon="♧"
-            title="대중성 에이전트"
-            subtitle="몰입도 · 재미 · 반응"
+            title="Narrative Agent"
+            subtitle="몰입도 · 감성 · 줄거리"
             score="8.8"
             className="card-popular"
           />
 
 
-          {/* 취향 분석 에이전트 */}
+          {/* Public 에이전트 */}
           <AgentCard
             icon="♧"
-            title="취향 분석 에이전트"
-            subtitle="개인화 · 맥락 · 발견"
+            title="Public Atent"
+            subtitle="관객 반응 · 인기도 · 트렌드"
             score="9.5"
             className="card-preference"
           />
