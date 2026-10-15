@@ -1,11 +1,15 @@
 """
 agent_service.py
-Technical / Narrative / Public 에이전트 평가 서비스
+Technical / Narrative / Public 에이전트 평가 서비스 (LangGraph StateGraph)
 
-역할
-1. 후보 콘텐츠를 Technical / Narrative / Public 세 관점에서 평가
-2. 관점별 점수(score)와 근거(reason) 생성
-3. 세 점수를 가중합해 최종 점수(final_score) 계산
+그래프 구조 (후보 1개당 1회 실행)
+
+            ┌─> technical_agent ─┐
+    START ──┼─> narrative_agent ─┼─> aggregate ─> END
+            └─> public_agent ────┘
+
+- 세 에이전트 노드는 같은 State를 읽고 각자 자기 키(technical / narrative / public)만 쓴다.
+- aggregate 노드가 세 점수를 가중합해 final_score를 계산한다.
 
 사용 예 (main.py)
     ranked = await evaluate_candidates(client, candidates, query, weights)
@@ -24,9 +28,11 @@ import asyncio
 import json
 import os
 import re
+from typing import TypedDict
 
 import httpx
 from dotenv import load_dotenv
+from langgraph.graph import END, START, StateGraph
 
 load_dotenv()  # main.py에서 이미 불러오고 있다면 이 줄은 지워도 된다
 
@@ -47,6 +53,19 @@ DEFAULT_WEIGHTS = {"technical": 0.35, "narrative": 0.35, "public": 0.30}
 MAX_CONCURRENT_LLM_CALLS = 6
 
 FAIL_RESULT = {"score": 5.0, "reason": "평가 실패"}
+
+
+# ------------------------------------------------------------------
+# LangGraph State
+# ------------------------------------------------------------------
+class EvalState(TypedDict, total=False):
+    candidate: dict          # 평가할 후보 1개
+    query: str               # 사용자 검색어
+    weights: dict | None     # 최종 점수 가중치 (None이면 기본값)
+    technical: dict          # {"score", "reason"}
+    narrative: dict
+    public: dict
+    final_score: float
 
 
 # ------------------------------------------------------------------
@@ -192,7 +211,8 @@ reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
 reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
 - 서사 구조와 전개 방식
 - 캐릭터의 감성선과 성장
-- 사용자 요청 키워드와 어떻게 맞닿는지""",
+- 사용자 요청 키워드와 어떻게 맞닿는지
+- 키워드는 한국어로 풀어서 설명할 것""",
     "public": """너는 대중성 및 트렌드 평가 전문가야.
 관객 반응, TMDB 평점 신뢰도, 인기도, 트렌드 부합 여부를 0~10점으로 평가해줘.
 reason은 반드시 3~4문장으로 써줘. 다음 내용을 포함해:
@@ -253,7 +273,7 @@ def parse_agent_response(raw: str) -> dict:
 
 
 # ------------------------------------------------------------------
-# 에이전트 1명 평가
+# 에이전트 1명 평가 (노드 안에서 호출)
 # ------------------------------------------------------------------
 async def score_candidate(
     client: httpx.AsyncClient,
@@ -294,6 +314,39 @@ def calculate_final_score(scores: dict, weights: dict | None = None) -> float:
 
 
 # ------------------------------------------------------------------
+# LangGraph 구성
+# ------------------------------------------------------------------
+def build_graph(client: httpx.AsyncClient, semaphore: asyncio.Semaphore):
+    """에이전트 3개를 병렬 노드로, 점수 계산을 마지막 노드로 하는 그래프를 만든다."""
+
+    def make_agent_node(agent_type: str):
+        async def agent_node(state: EvalState) -> dict:
+            result = await score_candidate(
+                client, state["candidate"], state["query"], agent_type, semaphore
+            )
+            return {agent_type: result}  # 자기 키만 State에 쓴다
+
+        return agent_node
+
+    def aggregate_node(state: EvalState) -> dict:
+        scores = {a: state[a]["score"] for a in AGENT_TYPES}
+        return {"final_score": calculate_final_score(scores, state.get("weights"))}
+
+    builder = StateGraph(EvalState)
+
+    # 주의: 노드 이름은 State 키(technical 등)와 같으면 에러가 나서 _agent를 붙인다
+    for agent_type in AGENT_TYPES:
+        builder.add_node(f"{agent_type}_agent", make_agent_node(agent_type))
+        builder.add_edge(START, f"{agent_type}_agent")  # START에서 세 노드로 동시에 분기
+
+    builder.add_node("aggregate", aggregate_node)
+    builder.add_edge([f"{a}_agent" for a in AGENT_TYPES], "aggregate")  # 세 노드가 모두 끝나면 실행
+    builder.add_edge("aggregate", END)
+
+    return builder.compile()
+
+
+# ------------------------------------------------------------------
 # 후보 전체 평가 + 정렬
 # ------------------------------------------------------------------
 async def evaluate_candidates(
@@ -313,26 +366,20 @@ async def evaluate_candidates(
     # 1) 감독 / 출연진 / 키워드 붙이기
     await attach_details(client, candidates)
 
-    # 2) 후보 x 에이전트 전체를 한 번에 병렬 호출 (동시 호출 수는 semaphore로 제한)
+    # 2) 후보마다 그래프를 한 번씩 실행 (후보끼리도 병렬)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_CALLS)
+    graph = build_graph(client, semaphore)
 
-    tasks = [
-        score_candidate(client, c, query, agent, semaphore)
+    final_states = await asyncio.gather(*(
+        graph.ainvoke({"candidate": c, "query": query, "weights": weights})
         for c in candidates
-        for agent in AGENT_TYPES
-    ]
-    results = await asyncio.gather(*tasks)
+    ))
 
-    # 3) 결과를 후보별로 정리하고 최종 점수 계산
-    for i, c in enumerate(candidates):
-        per_agent = dict(zip(AGENT_TYPES, results[i * 3:(i + 1) * 3]))
-
-        c["technical"] = per_agent["technical"]
-        c["narrative"] = per_agent["narrative"]
-        c["public"] = per_agent["public"]
-        c["final_score"] = calculate_final_score(
-            {a: per_agent[a]["score"] for a in AGENT_TYPES},
-            weights,
-        )
+    # 3) 그래프 결과를 후보 dict에 붙인다
+    for c, state in zip(candidates, final_states):
+        c["technical"] = state["technical"]
+        c["narrative"] = state["narrative"]
+        c["public"] = state["public"]
+        c["final_score"] = state["final_score"]
 
     return sorted(candidates, key=lambda x: x["final_score"], reverse=True)

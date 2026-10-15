@@ -4,3 +4,4 @@ uvicorn[standard]
 httpx
 python-dotenv
 sentence-transformers
+langgraph
