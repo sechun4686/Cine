@@ -23,12 +23,16 @@ from .tmdb_details import (
     extract_director,
     extract_keywords,
     fetch_person_crew,
+    fetch_reviews,
 )
 
 MIN_TOOLS = 2
 MAX_TOOLS = 4
 TOOL_TIMEOUT = 10            # 도구 1개 실행 제한 시간(초)
 FILMOGRAPHY_MIN_VOTES = 50   # 필모그래피 평균에 포함할 최소 투표 수
+REVIEW_COUNT = 3             # 평가에 넣을 리뷰 수
+REVIEW_MAX_CHARS = 150       # 리뷰 1개당 최대 글자 수
+REVIEW_FALLBACK_LANGUAGE = "en-US"
 
 
 # ------------------------------------------------------------------
@@ -170,17 +174,32 @@ async def tool_release_year(ctx: ToolContext) -> str:
     return str(year) if year else NO_DATA
 
 
-async def tool_reviews(ctx: ToolContext) -> str:
-    # 참고: 상세정보를 ko-KR로 받기 때문에 한국어 리뷰가 없으면 비어 있을 수 있다
-    reviews = ctx.details.get("reviews", {}).get("results", [])[:3]
+def _format_reviews(reviews: list[dict]) -> list[str]:
     lines = []
     for r in reviews:
-        content = " ".join((r.get("content") or "").split())[:150]
+        content = " ".join((r.get("content") or "").split())[:REVIEW_MAX_CHARS]
         rating = (r.get("author_details") or {}).get("rating")
         prefix = f"[{rating}/10] " if rating is not None else ""
         if content:
             lines.append(f"{prefix}{content}")
-    return " | ".join(lines) if lines else NO_DATA
+        if len(lines) >= REVIEW_COUNT:
+            break
+    return lines
+
+
+async def tool_reviews(ctx: ToolContext) -> str:
+    """한국어 리뷰 우선. 없으면 [call] 영어 리뷰를 따로 요청한다."""
+    lines = _format_reviews(ctx.details.get("reviews", {}).get("results", []))
+    if lines:
+        return " | ".join(lines)
+
+    item_id = ctx.candidate.get("id")
+    if item_id is None:
+        return NO_DATA
+
+    reviews = await fetch_reviews(ctx.client, ctx.media_type, item_id, REVIEW_FALLBACK_LANGUAGE)
+    lines = _format_reviews(reviews)
+    return "(영어 리뷰) " + " | ".join(lines) if lines else NO_DATA
 
 
 # ---------- 도구 목록 (에이전트별 화이트리스트) ----------
@@ -216,8 +235,8 @@ TOOL_REGISTRY = {
                        "description": "TMDB 인기도 지수"},
         "release_year": {"label": "개봉 연도", "type": "extract", "func": tool_release_year,
                          "description": "개봉 또는 첫 방영 연도"},
-        "reviews": {"label": "관객 리뷰", "type": "extract", "func": tool_reviews,
-                    "description": "TMDB 관객 리뷰 일부 (없을 수 있음)"},
+        "reviews": {"label": "관객 리뷰", "type": "call", "func": tool_reviews,
+                    "description": "TMDB 관객 리뷰 일부 (한국어 리뷰가 없으면 영어 리뷰, 없을 수 있음)"},
     },
 }
 

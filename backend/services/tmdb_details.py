@@ -99,3 +99,16 @@ async def fetch_person_crew(client: httpx.AsyncClient, person_id: int) -> list[d
     )
     response.raise_for_status()
     return response.json().get("crew", [])
+
+async def fetch_reviews(client: httpx.AsyncClient, media_type: str, item_id: int, language: str) -> list[dict]:
+    """
+    리뷰만 따로 받는다. 상세정보는 ko-KR로 받기 때문에 append된 리뷰는 한국어 리뷰만 들어 있어
+    대부분 비어 있다. 한국어 리뷰가 없을 때 영어(en-US) 리뷰를 받는 용도.
+    """
+    response = await client.get(
+        f"{TMDB_BASE_URL}/{media_type}/{item_id}/reviews",
+        headers=tmdb_headers(),
+        params={"language": language, "page": 1},
+    )
+    response.raise_for_status()
+    return response.json().get("results", [])
