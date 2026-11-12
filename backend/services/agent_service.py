@@ -26,7 +26,9 @@ Technical / Narrative / Public 에이전트 평가 서비스 (LangGraph StateGra
 
 출력: 각 candidate에 아래 키가 추가되어 final_score 내림차순으로 반환된다
     director / cast / keywords        : 기존과 동일 (다른 서비스 호환용)
-    technical / narrative / public    = {"score": float, "reason": str}
+    technical / narrative / public    = {"score": float | None, "reason": str, "failed": bool}
+    final_score = float  (실패한 에이전트는 빼고 가중치를 다시 정규화해 계산.
+                          세 에이전트 모두 실패한 후보는 결과에서 제외된다)
     tool_usage = {에이전트: {"tools", "reason", "status", "rejected", "failed", "data"}}
     final_score = float
 """
@@ -56,11 +58,15 @@ DEFAULT_WEIGHTS = {"technical": 0.35, "narrative": 0.35, "public": 0.30}
 # 동시에 보낼 Luxia 호출 수 제한 (5개 후보 x 3개 에이전트 x 2회 = 30회)
 MAX_CONCURRENT_LLM_CALLS = 6
 
-FAIL_RESULT = {"score": 5.0, "reason": "평가 실패"}
+# 평가 실패는 점수를 None으로 두어 최종 점수 계산에서 제외한다 (예전에는 5.0점으로 섞였음)
+FAIL_RESULT = {"score": None, "reason": "평가 실패", "failed": True}
+
+# 응답 JSON을 해석하지 못했을 때 같은 프롬프트로 다시 요청하는 횟수
+PARSE_RETRIES = 1
 
 # 도구 선택은 재현성을 위해 낮은 temperature 사용
 SELECT_TEMPERATURE = 0.1
-EVAL_TEMPERATURE = 0.7
+EVAL_TEMPERATURE = 0.2   # 같은 후보의 점수 편차(재현성)를 줄이기 위해 낮게 설정 (기존 0.7)
 
 
 # ------------------------------------------------------------------
@@ -113,7 +119,7 @@ async def select_tools(
 # 응답 파싱
 # ------------------------------------------------------------------
 def parse_agent_response(raw: str) -> dict:
-    """LLM 응답에서 score / reason을 꺼낸다. 실패하면 FAIL_RESULT."""
+    """LLM 응답에서 score / reason을 꺼낸다. 실패하면 FAIL_RESULT 복사본."""
     result = extract_json(raw)
     if result is None:
         return dict(FAIL_RESULT)
@@ -136,6 +142,7 @@ def parse_agent_response(raw: str) -> dict:
     return {
         "score": max(0.0, min(10.0, score)),  # 0~10 범위로 보정
         "reason": str(result.get("reason", "-")),
+        "failed": False,
     }
 
 
@@ -149,32 +156,50 @@ async def score_candidate(
 ) -> dict:
     prompt = build_prompt(candidate, query, agent_type, tool_data)
 
-    try:
-        async with semaphore:
-            raw = await call_luxia(client, "너는 영화 평가 AI야.", prompt, temperature=EVAL_TEMPERATURE)
-        return parse_agent_response(raw)
-    except Exception as e:
-        print(f"[agent_service] {agent_type} 평가 오류 ({candidate.get('title')}): {e}")
-        return dict(FAIL_RESULT)
+    for attempt in range(PARSE_RETRIES + 1):
+        try:
+            async with semaphore:
+                raw = await call_luxia(client, "너는 영화 평가 AI야.", prompt, temperature=EVAL_TEMPERATURE)
+        except Exception as e:
+            # 네트워크/서버 오류 재시도는 call_luxia 안에서 이미 했으므로 여기서는 포기
+            print(f"[agent_service] {agent_type} 평가 오류 ({candidate.get('title')}): {e}")
+            return dict(FAIL_RESULT)
+
+        result = parse_agent_response(raw)
+        if not result["failed"]:
+            return result
+        print(f"[agent_service] {agent_type} 응답 해석 실패 ({candidate.get('title')}) "
+              f"시도 {attempt + 1}/{PARSE_RETRIES + 1}: {(raw or '')[:80]!r}")
+
+    return dict(FAIL_RESULT)
 
 
 # ------------------------------------------------------------------
 # 최종 점수 계산
 # ------------------------------------------------------------------
-def calculate_final_score(scores: dict, weights: dict | None = None) -> float:
+def calculate_final_score(scores: dict, weights: dict | None = None) -> float | None:
     """
-    scores  : {"technical": 8.5, "narrative": 7.0, "public": 6.0}
+    scores  : {"technical": 8.5, "narrative": 7.0, "public": None}
+              None인 점수(평가 실패)는 빼고 나머지 가중치를 다시 정규화한다
     weights : {"technical": 0.4, "narrative": 0.4, "public": 0.2}
               None이면 기본 가중치(35:35:30) 사용
+    return  : 0~10 점수. 모든 점수가 None이면 None
     """
     w = weights or DEFAULT_WEIGHTS
+    if sum(w.get(a, 0) for a in AGENT_TYPES) <= 0:
+        w = DEFAULT_WEIGHTS
 
-    total_w = sum(w.get(a, 0) for a in AGENT_TYPES)
+    valid = [a for a in AGENT_TYPES if scores.get(a) is not None]
+    if not valid:
+        return None
+
+    total_w = sum(w.get(a, 0) for a in valid)
     if total_w <= 0:
-        w, total_w = DEFAULT_WEIGHTS, 1.0
+        # 성공한 관점의 가중치가 모두 0이면 성공한 점수의 단순 평균
+        return round(sum(scores[a] for a in valid) / len(valid), 2)
 
     # 가중치 합이 1.0이 아니어도 정규화해서 사용
-    final = sum(scores[a] * w.get(a, 0) for a in AGENT_TYPES) / total_w
+    final = sum(scores[a] * w.get(a, 0) for a in valid) / total_w
     return round(final, 2)
 
 
@@ -256,11 +281,18 @@ async def evaluate_candidates(
     ))
 
     # 3) 그래프 결과를 후보 dict에 붙인다
+    evaluated = []
     for c, state in zip(candidates, final_states):
         c["technical"] = state["technical"]
         c["narrative"] = state["narrative"]
         c["public"] = state["public"]
         c["tool_usage"] = {a: state.get(f"{a}_tools", {}) for a in AGENT_TYPES}
         c["final_score"] = state["final_score"]
+        c["failed_agents"] = [a for a in AGENT_TYPES if state[a].get("failed")]
 
-    return sorted(candidates, key=lambda x: x["final_score"], reverse=True)
+        if c["final_score"] is None:
+            print(f"[agent_service] 세 에이전트 모두 평가 실패 -> 순위에서 제외 ({c.get('title')})")
+            continue
+        evaluated.append(c)
+
+    return sorted(evaluated, key=lambda x: x["final_score"], reverse=True)

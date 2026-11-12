@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 import asyncio
 import os
@@ -11,6 +13,7 @@ from services.candidate_service import select_candidates
 from services.editor_service import build_editor_prompt
 from services.embedding_service import rank_candidates_by_similarity
 from services.llm_service import call_luxia
+from services.rerecommend_service import candidate_key, pick_alternative
 from services.tmdb_service import fetch_filtered_pool
 from services.weight_service import infer_weights
 
@@ -45,6 +48,14 @@ class RecommendRequest(BaseModel):
     media: list[str] = Field(default_factory=list)
     runtime: int = 120
     query: str = ""
+    exclude_ids: list[str] = Field(default_factory=list)   # "movie:123" 형식. 재추천 시 이미 본/거절한 작품
+
+
+class RerecommendRequest(BaseModel):
+    query: str = ""
+    feedback: Literal["watched", "not_interested"]
+    rejected: dict                                          # 거절한 추천작 (응답의 best 그대로)
+    candidates: list[dict] = Field(default_factory=list)    # 남은 평가 완료 후보 (응답의 others 그대로)
 
 
 @app.get("/")
@@ -135,7 +146,7 @@ async def search_tmdb(
 #   5) Lead Editor 총평                  editor_service.build_editor_prompt
 # ------------------------------------------------------------------
 POOL_SIZE = 60          # 전체 후보군 크기 (매체가 여러 개면 나눠서 수집)
-OTHERS_COUNT = 3        # best 외에 함께 보여줄 후보 수
+OTHERS_COUNT = 4        # best 외에 함께 보여줄 후보 수 (재추천 후보로도 쓰므로 평가한 후보를 모두 보낸다)
 
 
 def _resolve_media(request: RecommendRequest) -> list[tuple[str, list[str]]]:
@@ -223,7 +234,41 @@ def _format_candidate(item: dict, weights: dict, editor_comment: str = "") -> di
         "editor_comment": editor_comment,
         "weights": weights,
         "tool_usage": item.get("tool_usage", {}),       # 에이전트별 선택 도구와 근거 데이터
+        "failed_agents": item.get("failed_agents", []),  # 평가에 실패해 최종 점수에서 제외된 에이전트
     }
+
+
+def _log_candidates(query: str, pool_size: int, weight_result: dict, candidates: list[dict]) -> None:
+    """선별된 후보 5개를 터미널에 출력한다."""
+    w = weight_result["weights"]
+    print("\n" + "=" * 70)
+    print(f"[recommend] 검색어: {query or '(없음)'} | 후보군 {pool_size}개")
+    print(f"[recommend] 가중치 T {w['technical']:.3f} / N {w['narrative']:.3f} / P {w['public']:.3f}"
+          f" ({weight_result['status']}) 중요도={weight_result['importance']}")
+    print("[recommend] 선별된 후보")
+    for i, c in enumerate(candidates, 1):
+        print(f"  C{i} [{c.get('label', '-')}] {c.get('title')} ({c.get('year') or '-'})"
+              f" | 평점 {float(c.get('vote_average') or 0):.1f}"
+              f" | 투표 {int(c.get('vote_count') or 0):,}"
+              f" | 인기도 {float(c.get('popularity') or 0):.1f}"
+              f" | 유사도 {float(c.get('similarity') or 0):.3f}")
+    print("=" * 70)
+
+
+def _fmt_score(score) -> str:
+    """평가 실패(None)도 로그에 찍을 수 있게 문자열로 바꾼다."""
+    return "실패" if score is None else f"{score:.1f}"
+
+
+def _log_ranking(ranked: list[dict]) -> None:
+    """에이전트 평가 후 최종 순위를 터미널에 출력한다."""
+    print("[recommend] 최종 순위")
+    for i, c in enumerate(ranked, 1):
+        print(f"  {i}위 {c.get('title')} [{c.get('label', '-')}]"
+              f" | 최종 {c['final_score']:.2f}"
+              f" (T {_fmt_score(c['technical']['score'])} / N {_fmt_score(c['narrative']['score'])}"
+              f" / P {_fmt_score(c['public']['score'])})")
+    print("=" * 70 + "\n")
 
 
 @app.post("/api/recommend")
@@ -259,6 +304,16 @@ async def recommend(request: RecommendRequest):
                 detail="선택한 조건에 맞는 작품을 찾지 못했습니다. 조건을 바꿔서 다시 시도해 주세요.",
             )
 
+        # 재추천: 이미 추천했거나 거절한 작품 제외
+        if request.exclude_ids:
+            excluded = set(request.exclude_ids)
+            pool = [item for item in pool if candidate_key(item) not in excluded]
+            if not pool:
+                raise HTTPException(
+                    status_code=404,
+                    detail="이 조건에서 더 추천할 작품이 없어요. 조건을 바꿔서 다시 시도해 주세요.",
+                )
+
         weights = weight_result["weights"]
 
         # 2) 유사도 계산 (임베딩 연산이 무거워 별도 스레드에서 실행)
@@ -266,12 +321,15 @@ async def recommend(request: RecommendRequest):
 
         # 3) 후보 5개 선별
         candidates = select_candidates(pool, query)
+        _log_candidates(query, len(pool), weight_result, candidates)
 
         # 4) 에이전트 평가 + 가중치 적용 최종 점수
         ranked = await evaluate_candidates(client, candidates, query, weights)
 
         if not ranked:
             raise HTTPException(status_code=502, detail="에이전트 평가 결과가 없습니다.")
+
+        _log_ranking(ranked)
 
         # 5) Lead Editor 총평 (1위 작품만)
         best = ranked[0]
@@ -286,4 +344,46 @@ async def recommend(request: RecommendRequest):
             "reason": weight_result["reason"],
             "status": weight_result["status"],
         },
+    }
+
+def _as_evaluated(item: dict) -> dict:
+    """_format_candidate 형식을 Lead Editor 프롬프트가 쓰는 형식으로 되돌린다."""
+    scores = item.get("scores") or {}
+    reasons = item.get("reasons") or {}
+    return {
+        **item,
+        **{a: {"score": scores.get(a), "reason": reasons.get(a, "")} for a in ("technical", "narrative", "public")},
+    }
+
+
+@app.post("/api/rerecommend")
+async def rerecommend(request: RerecommendRequest):
+    """
+    피드백 기반 재추천. 이미 평가한 후보 중에서 고르므로 에이전트 평가를 다시 하지 않고,
+    새 추천작의 Lead Editor 총평만 생성한다 (LLM 1회).
+    고를 후보가 없으면 need_new_search=True -> 프론트가 exclude_ids를 붙여 /api/recommend를 다시 호출한다.
+    """
+    pick, note = pick_alternative(request.rejected, request.candidates, request.feedback)
+
+    if pick is None:
+        return {"need_new_search": True, "note": note}
+
+    if not os.getenv("LUXIA_API_KEY"):
+        raise HTTPException(status_code=500, detail="LUXIA_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        editor_comment = await _write_editor_comment(client, request.query.strip(), _as_evaluated(pick))
+
+    pick_key = candidate_key(pick)
+    rejected_key = candidate_key(request.rejected)
+    others = [
+        c for c in request.candidates
+        if candidate_key(c) not in (pick_key, rejected_key)
+    ]
+
+    return {
+        "need_new_search": False,
+        "note": note,
+        "best": {**pick, "reason": editor_comment, "editor_comment": editor_comment},
+        "others": others,
     }

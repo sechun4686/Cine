@@ -8,8 +8,19 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_URL } from '../constants'
 import '../main.css'
+
+const FEEDBACK_OPTIONS = [
+  { value: 'watched', label: '이미 봤어요' },
+  { value: 'not_interested', label: '관심 없어요' },
+]
+
+function candidateKey(item) {
+  return `${item?.media_type || 'movie'}:${item?.id}`
+}
 
 const agentInfo = [
   {
@@ -61,10 +72,62 @@ function ScoreTooltip({ active, payload }) {
   )
 }
 
-function Result({ result }) {
+function Result({ result, setResult, filters, excludeIds = [], setExcludeIds }) {
   const navigate = useNavigate()
   const best = result?.best
   const others = result?.others ?? []
+  const [pendingFeedback, setPendingFeedback] = useState('')
+  const [feedbackError, setFeedbackError] = useState('')
+
+  // 피드백 기반 재추천: 평가가 끝난 남은 후보 중에서 고르고, 없으면 제외 목록을 붙여 새로 검색
+  async function handleFeedback(feedback) {
+    if (!best || pendingFeedback) return
+
+    setPendingFeedback(feedback)
+    setFeedbackError('')
+    const nextExclude = [...new Set([...excludeIds, candidateKey(best)])]
+
+    try {
+      const response = await fetch(`${API_URL}/api/rerecommend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: filters?.query ?? '',
+          feedback,
+          rejected: best,
+          candidates: others,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.detail === 'string' ? data.detail : `재추천 API 오류 (${response.status})`
+        )
+      }
+
+      if (data.need_new_search) {
+        // 남은 후보가 마땅치 않음 -> 이번에 평가한 작품을 모두 빼고 새로 검색
+        setExcludeIds?.([...new Set([...nextExclude, ...others.map(candidateKey)])])
+        navigate('/loading')
+        return
+      }
+
+      setExcludeIds?.(nextExclude)
+      setResult?.({
+        ...result,
+        best: data.best,
+        others: data.others ?? [],
+        rerecommend_note: data.note,
+      })
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (error) {
+      console.error('재추천 실패:', error)
+      setFeedbackError(error.message || '재추천에 실패했어요. 잠시 후 다시 시도해 주세요.')
+    } finally {
+      setPendingFeedback('')
+    }
+  }
 
   if (!best) {
     return (
@@ -140,12 +203,36 @@ function Result({ result }) {
             {best.overview || best.editor_comment || best.reason || '작품 정보가 없습니다.'}
           </p>
 
+          {result.rerecommend_note && (
+            <p className="rerecommend-note">↻ {result.rerecommend_note}</p>
+          )}
+
           <div className="editor-comment">
             <span className="comment-icon">✦</span>
             <div>
               <strong>세 에이전트가 함께 고른 이유</strong>
               <p>{best.editor_comment || best.reason || '입력한 조건과 작품 정보를 바탕으로 선정했습니다.'}</p>
             </div>
+          </div>
+
+          <div className="feedback-actions">
+            <span>이 작품 말고 다른 걸 볼래요</span>
+            <div>
+              {FEEDBACK_OPTIONS.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  className="feedback-button"
+                  disabled={Boolean(pendingFeedback)}
+                  onClick={() => handleFeedback(option.value)}
+                >
+                  {pendingFeedback === option.value ? '다른 작품 찾는 중...' : option.label}
+                </button>
+              ))}
+            </div>
+            {feedbackError && (
+              <p className="feedback-error" role="alert">{feedbackError}</p>
+            )}
           </div>
         </div>
       </section>

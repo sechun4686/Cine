@@ -26,32 +26,31 @@ def rank_candidates_by_similarity(
         normalize_embeddings=True,
     )[0]
 
-    # 줄거리가 비어 있는 작품은 빈 문자열로 처리
+    # 줄거리가 빈 작품은 빈 문자열 임베딩이 엉뚱한 유사도를 받으므로 계산하지 않고 0으로 둔다
     overviews = [
         (item.get("overview") or "").strip()
         for item in candidates
     ]
+    has_text = [i for i, text in enumerate(overviews) if text]
 
-    overview_embeddings = model.encode(
-        overviews,
-        normalize_embeddings=True,
-        batch_size=16,
-    )
+    similarities = [0.0] * len(candidates)
 
-    similarities = overview_embeddings @ query_embedding
+    if has_text:
+        overview_embeddings = model.encode(
+            [overviews[i] for i in has_text],
+            normalize_embeddings=True,
+            batch_size=16,
+        )
+        for i, sim in zip(has_text, overview_embeddings @ query_embedding):
+            similarities[i] = float(sim)
 
-    ranked_candidates = []
-
-    for item, similarity in zip(candidates, similarities):
-        ranked_item = {
-            **item,
-            "similarity": round(float(similarity), 4),
-        }
-        ranked_candidates.append(ranked_item)
+    ranked_candidates = [
+        {**item, "similarity": round(similarity, 4)}
+        for item, similarity in zip(candidates, similarities)
+    ]
 
     return sorted(
         ranked_candidates,
         key=lambda item: item["similarity"],
         reverse=True,
     )
-

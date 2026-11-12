@@ -155,7 +155,7 @@ async def fetch_filtered_pool(
                 "vote_count": item.get("vote_count", 0),
                 "popularity": item.get("popularity", 0),
                 "media_type": media_type,
-                
+                "genre_ids": item.get("genre_ids", []),
             })
 
             if len(candidates) >= target_count:

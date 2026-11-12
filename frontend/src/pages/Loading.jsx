@@ -1,10 +1,8 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_URL } from "../constants";
 import "./Loading.css";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 const AGENTS = [
   {
@@ -47,8 +45,57 @@ const AGENTS = [
   },
 ];
 
+async function requestRecommendation(filters, excludeIds = []) {
+  if (!filters) {
+    throw new Error(
+      "추천 입력값을 찾을 수 없습니다. 입력 페이지부터 다시 진행해 주세요."
+    );
+  }
+
+  const payload = {
+    ...filters,
+    ott: Array.isArray(filters.ott) ? filters.ott : [],
+    genres: Array.isArray(filters.genres) ? filters.genres : [],
+    media: Array.isArray(filters.media)
+      ? filters.media
+      : filters.media
+        ? [filters.media]
+        : [],
+    runtime: Number(filters.runtime ?? 120),
+    query: filters.query ?? "",
+    exclude_ids: Array.isArray(excludeIds) ? excludeIds : [],
+  };
+
+  const response = await fetch(`${API_URL}/api/recommend`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : `추천 API 오류 (${response.status})`
+    );
+  }
+
+  if (!data.best) {
+    throw new Error(
+      "추천 결과 형식이 예상과 다릅니다. 백엔드 응답을 확인해 주세요."
+    );
+  }
+
+  return data;
+}
+
 export default function Loading({
   filters,
+  excludeIds,
   setResult,
   onComplete,
 }) {
@@ -61,74 +108,40 @@ export default function Loading({
   const [resultReady, setResultReady] = useState(false);
 
   // 백엔드에 실제 추천 요청
+  // 개발 모드의 StrictMode는 effect를 두 번 실행한다. 예전에는 첫 요청을 abort해도
+  // 백엔드는 끝까지 처리해서 LLM 호출이 두 배가 됐다. 같은 filters면 진행 중인 요청을 재사용한다.
+  const requestRef = useRef(null);
+
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
 
-    async function fetchRecommendation() {
-      try {
-        setRequestError("");
-        setResultReady(false);
-
-        if (!filters || typeof setResult !== "function") {
-          throw new Error(
-            "추천 입력값을 찾을 수 없습니다. 입력 페이지부터 다시 진행해 주세요."
-          );
-        }
-
-        const payload = {
-          ...filters,
-          ott: Array.isArray(filters.ott) ? filters.ott : [],
-          genres: Array.isArray(filters.genres) ? filters.genres : [],
-          media: Array.isArray(filters.media)
-            ? filters.media
-            : filters.media
-              ? [filters.media]
-              : [],
-          runtime: Number(filters.runtime ?? 120),
-          query: filters.query ?? "",
-        };
-
-        const response = await fetch(`${API_BASE_URL}/api/recommend`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(
-            typeof data.detail === "string"
-              ? data.detail
-              : `추천 API 오류 (${response.status})`
-          );
-        }
-
-        if (!data.best) {
-          throw new Error(
-            "추천 결과 형식이 예상과 다릅니다. 백엔드 응답을 확인해 주세요."
-          );
-        }
-
-        setResult(data);
-        setResultReady(true);
-      } catch (error) {
-        if (error.name === "AbortError") return;
-
-        console.error("추천 API 호출 실패:", error);
-        setRequestError(
-          error.message || "서버에 연결하지 못했습니다."
-        );
-      }
+    const current = requestRef.current;
+    if (current?.filters !== filters || current?.excludeIds !== excludeIds) {
+      setRequestError("");
+      setResultReady(false);
+      requestRef.current = {
+        filters,
+        excludeIds,
+        promise: requestRecommendation(filters, excludeIds),
+      };
     }
 
-    fetchRecommendation();
+    requestRef.current.promise
+      .then((data) => {
+        if (!active) return;
+        setResult(data);
+        setResultReady(true);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error("추천 API 호출 실패:", error);
+        setRequestError(error.message || "서버에 연결하지 못했습니다.");
+      });
 
-    return () => controller.abort();
-  }, [filters, setResult]);
+    return () => {
+      active = false;
+    };
+  }, [filters, excludeIds, setResult]);
 
   // 기존 로딩 애니메이션 유지
   useEffect(() => {

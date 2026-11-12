@@ -28,5 +28,9 @@ export const AGENT_LABELS = {
 
 export const POINT_COLOR = '#ffcc44'
 
-// 백엔드 주소 (나중에 .env의 VITE_API_URL로 교체 가능)
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// 백엔드 주소. 배포(Vercel)에서는 VITE_API_BASE_URL 환경변수로 지정한다.
+// (예전 이름 VITE_API_URL도 호환용으로 읽는다)
+export const API_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  'http://127.0.0.1:8000'
