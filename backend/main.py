@@ -223,6 +223,7 @@ def _format_candidate(item: dict, weights: dict, editor_comment: str = "") -> di
         "editor_comment": editor_comment,
         "weights": weights,
         "tool_usage": item.get("tool_usage", {}),       # 에이전트별 선택 도구와 근거 데이터
+        "failed_agents": item.get("failed_agents", []),  # 평가에 실패해 최종 점수에서 제외된 에이전트
     }
 
 

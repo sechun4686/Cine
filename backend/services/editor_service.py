@@ -2,6 +2,11 @@
 from typing import Any
 
 
+def _score_text(evaluation: dict[str, Any]) -> str:
+    score = evaluation.get("score")
+    return "평가 실패 (근거로 사용하지 말 것)" if score is None else str(score)
+
+
 def build_editor_prompt(
     query: str,
     best: dict[str, Any],
@@ -24,15 +29,15 @@ def build_editor_prompt(
 {best.get("overview", "")}
 
 Technical 평가:
-점수: {technical.get("score", 0)}
+점수: {_score_text(technical)}
 근거: {technical.get("reason", "")}
 
 Narrative 평가:
-점수: {narrative.get("score", 0)}
+점수: {_score_text(narrative)}
 근거: {narrative.get("reason", "")}
 
 Public 평가:
-점수: {public.get("score", 0)}
+점수: {_score_text(public)}
 근거: {public.get("reason", "")}
 
 위 평가를 종합해 한국어로 4~5문장의 추천 총평을 작성하라.

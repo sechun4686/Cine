@@ -3,6 +3,7 @@ llm_service.py
 Luxia LLM 호출과 응답(JSON) 파싱 공통 함수
 """
 
+import asyncio
 import json
 import os
 import re
@@ -11,6 +12,17 @@ import httpx
 
 LUXIA_URL = "https://bridge.luxiacloud.com/luxia/v1/chat"
 LUXIA_MODEL = "luxia3-llm-32b-0731"
+
+MAX_RETRIES = 2              # 첫 시도 이후 재시도 횟수 (총 3회)
+RETRY_BASE_DELAY = 1.0       # 재시도 대기 시간(초): 1s, 2s ... 지수 증가
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """일시적인 오류(연결 끊김, 타임아웃, 429/5xx)만 재시도한다. 키 오류 같은 4xx는 바로 실패."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in RETRYABLE_STATUS
+    return isinstance(exc, httpx.TransportError)
 
 
 async def call_luxia(
@@ -24,6 +36,25 @@ async def call_luxia(
     if not api_key:
         raise ValueError("LUXIA_API_KEY 환경변수가 설정되지 않았습니다.")
 
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return await _post_luxia(client, api_key, system_prompt, user_prompt, temperature, max_tokens)
+        except Exception as e:
+            if attempt >= MAX_RETRIES or not _is_retryable(e):
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            print(f"[llm_service] Luxia 호출 실패, {delay:.0f}초 후 재시도 ({attempt + 1}/{MAX_RETRIES}): {e!r}")
+            await asyncio.sleep(delay)
+
+
+async def _post_luxia(
+    client: httpx.AsyncClient,
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_tokens: int,
+) -> str:
     response = await client.post(
         LUXIA_URL,
         headers={
