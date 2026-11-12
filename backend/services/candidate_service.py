@@ -24,8 +24,13 @@ CANDIDATE_LABELS = [
 
 RELEVANT_RATIO = 0.35      # 유사도 상위 몇 %를 관련 후보로 볼지 (60개 기준 21개)
 RELEVANT_MIN = 10          # 관련 후보군 최소 크기
-MIN_VOTES_FOR_RATING = 30  # 평점을 믿을 수 있는 최소 투표 수 (투표 2개짜리 10점 방지)
+MIN_VOTES_FOR_RATING = 30  # 모든 기준에 적용하는 최소 투표 수 (투표 2~3개짜리 작품 방지)
 RECENT_YEARS = 2
+
+# 의외의 추천 점수 = 유사도(관련 후보군 안에서 0~1 정규화) * W_SIM + 장르 참신성 * W_NOVELTY
+# 예전에는 장르 참신성만 봐서, 힐링 쿼리에 불륜·성인 로맨스물이 '의외의 추천'으로 뽑혔다
+UNEXPECTED_W_SIM = 0.6
+UNEXPECTED_W_NOVELTY = 0.4
 
 
 def _enrich(movie: dict, now_year: int) -> dict:
@@ -105,13 +110,13 @@ def select_candidates(
 
     # C2: 검색어와 줄거리의 의미 유사도
     c2 = pick(sorted(
-        relevant,
+        _trusted(relevant),
         key=lambda x: x["similarity"],
         reverse=True,
     ))
 
     # C3: 최근 작품을 우선 선정 (없으면 관련 후보 중 가장 최신)
-    recent = [x for x in relevant if x["years_ago"] <= RECENT_YEARS]
+    recent = [x for x in _trusted(relevant) if x["years_ago"] <= RECENT_YEARS]
     c3 = pick(sorted(
         recent,
         key=lambda x: (
@@ -122,7 +127,7 @@ def select_candidates(
     ))
 
     if c3 is None:
-        c3 = pick(sorted(relevant, key=lambda x: x["years_ago"]))
+        c3 = pick(sorted(_trusted(relevant), key=lambda x: x["years_ago"]))
 
     # C4: 평점은 높고 인기도는 상대적으로 낮은 작품 (투표 수가 충분한 작품만)
     c4 = pick(sorted(
@@ -134,17 +139,29 @@ def select_candidates(
         reverse=True,
     ))
 
-    # C5: 의외의 추천. 검색어 맥락(관련 후보군)은 유지하면서,
-    #     앞서 고른 작품들과 장르가 가장 덜 겹치는 작품을 고른다.
-    #     (예전에는 유사도가 가장 낮은 작품을 골라 검색어와 무관한 작품이 들어왔다)
-    def genre_overlap(x: dict) -> float:
-        if not x["genre_ids"]:
+    # C5: 의외의 추천. 검색어와의 유사도를 유지하면서, 앞서 고른 작품들과
+    #     장르가 덜 겹치는 작품을 고른다 (유사도와 장르 참신성을 함께 점수화).
+    c5_pool = _trusted(relevant)
+    sims = [x["similarity"] for x in c5_pool]
+    sim_min, sim_max = min(sims), max(sims)
+
+    def sim_norm(x: dict) -> float:
+        if sim_max <= sim_min:
             return 1.0
-        return len(set(x["genre_ids"]) & picked_genres) / len(x["genre_ids"])
+        return (x["similarity"] - sim_min) / (sim_max - sim_min)
+
+    def genre_novelty(x: dict) -> float:
+        if not x["genre_ids"]:
+            return 0.0
+        return 1 - len(set(x["genre_ids"]) & picked_genres) / len(x["genre_ids"])
 
     c5 = pick(sorted(
-        _trusted(relevant),
-        key=lambda x: (-genre_overlap(x), x["vote_average"]),
+        c5_pool,
+        key=lambda x: (
+            sim_norm(x) * UNEXPECTED_W_SIM
+            + genre_novelty(x) * UNEXPECTED_W_NOVELTY,
+            x["vote_average"],
+        ),
         reverse=True,
     ))
 

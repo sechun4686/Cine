@@ -44,3 +44,22 @@ def test_unexpected_pick_prefers_different_genre():
     pool.append(_movie(50, 0.555, vote=6.0, genres=(35,)))   # 유일한 코미디, 관련 후보군(상위 10개) 안
     picks = {p["label"]: p["id"] for p in select_candidates(pool, "q")}
     assert picks["의외의 추천"] == 50
+
+
+def test_low_vote_count_excluded_from_similarity_pick():
+    # 로그에서 본 사례: 투표 3개짜리 작품이 '검색어 유사도' 후보로 뽑힘
+    pool = [_movie(i, 0.3 - i * 0.005) for i in range(12)]
+    pool.append(_movie(999, 0.9, vote=6.7, votes=3))
+    picks = {p["id"] for p in select_candidates(pool, "q")}
+    assert 999 not in picks
+
+
+def test_unexpected_pick_does_not_take_least_similar_just_for_genre():
+    # 로그에서 본 사례: 장르만 다르고 유사도가 낮은 작품(성인 로맨스)이 '의외의 추천'으로 뽑힘
+    pool = [_movie(i, 0.35 - i * 0.01, genres=(18,)) for i in range(8)]      # 드라마, 유사도 높음
+    pool.append(_movie(60, 0.33, genres=(18, 16)))                            # 일부 다른 장르 + 유사도 높음
+    pool.append(_movie(70, 0.20, genres=(10749,)))                           # 완전히 다른 장르, 관련 후보군 안 최저 유사도
+    pool += [_movie(200 + i, 0.05) for i in range(10)]                        # 관련 후보군 밖
+    assert 70 in {x["id"] for x in relevant_pool([_enrich(m, 2026) for m in pool], "q")}
+    picks = {p["label"]: p["id"] for p in select_candidates(pool, "q")}
+    assert picks["의외의 추천"] != 70
