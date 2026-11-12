@@ -72,12 +72,46 @@ function ScoreTooltip({ active, payload }) {
   )
 }
 
-function Result({ result, setResult, filters, excludeIds = [], setExcludeIds }) {
+function Result({
+  result,
+  setResult,
+  filters,
+  excludeIds = [],
+  setExcludeIds,
+  participantId = '',
+  shownOrder = 1,
+  setShownOrder,
+}) {
   const navigate = useNavigate()
   const best = result?.best
   const others = result?.others ?? []
   const [pendingFeedback, setPendingFeedback] = useState('')
   const [feedbackError, setFeedbackError] = useState('')
+  const [acceptedKey, setAcceptedKey] = useState('')
+  const accepted = Boolean(best) && acceptedKey === candidateKey(best)
+
+  // '이거 볼래요': 재추천 없이 기록만 남긴다 (첫 추천 수락률 분석용)
+  async function handleAccept() {
+    if (!best || accepted) return
+    setAcceptedKey(candidateKey(best))
+    setFeedbackError('')
+    try {
+      await fetch(`${API_URL}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback: 'accepted',
+          item: best,
+          request_id: result?.request_id ?? '',
+          participant_id: participantId,
+          shown_order: shownOrder,
+        }),
+      })
+    } catch (error) {
+      // 기록 실패는 사용자 경험에 영향을 주지 않도록 콘솔에만 남긴다
+      console.error('피드백 기록 실패:', error)
+    }
+  }
 
   // 피드백 기반 재추천: 평가가 끝난 남은 후보 중에서 고르고, 없으면 제외 목록을 붙여 새로 검색
   async function handleFeedback(feedback) {
@@ -96,6 +130,9 @@ function Result({ result, setResult, filters, excludeIds = [], setExcludeIds }) 
           feedback,
           rejected: best,
           candidates: others,
+          request_id: result?.request_id ?? '',
+          participant_id: participantId,
+          shown_order: shownOrder,
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -105,6 +142,8 @@ function Result({ result, setResult, filters, excludeIds = [], setExcludeIds }) 
           typeof data.detail === 'string' ? data.detail : `재추천 API 오류 (${response.status})`
         )
       }
+
+      setShownOrder?.(shownOrder + 1)
 
       if (data.need_new_search) {
         // 남은 후보가 마땅치 않음 -> 이번에 평가한 작품을 모두 빼고 새로 검색
@@ -216,7 +255,18 @@ function Result({ result, setResult, filters, excludeIds = [], setExcludeIds }) 
           </div>
 
           <div className="feedback-actions">
-            <span>이 작품 말고 다른 걸 볼래요</span>
+            {accepted ? (
+              <p className="feedback-thanks">좋은 선택이에요! 즐거운 감상 되세요 🎬</p>
+            ) : (
+              <button
+                type="button"
+                className="feedback-button feedback-accept"
+                disabled={Boolean(pendingFeedback)}
+                onClick={handleAccept}
+              >
+                이거 볼래요
+              </button>
+            )}
             <div>
               {FEEDBACK_OPTIONS.map((option) => (
                 <button

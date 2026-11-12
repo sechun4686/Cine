@@ -1125,3 +1125,20 @@ body {
   color: #ff8a80;
   font-size: 12px;
 }
+
+.feedback-accept {
+  border-color: #35b8d0;
+  background: #35b8d0;
+  color: #0f1a1d;
+}
+
+.feedback-accept:hover:not(:disabled) {
+  background: #4cc6dc;
+}
+
+.feedback-thanks {
+  margin: 0;
+  color: #8fd8e6;
+  font-size: 12px;
+  font-weight: 700;
+}

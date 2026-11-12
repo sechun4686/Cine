@@ -37,7 +37,7 @@ const RUNTIME_MIN = 0;
 const RUNTIME_MAX = 180;
 const RUNTIME_STEP = 10;
 
-export default function Input({ onSubmit, setFilters, setExcludeIds }) {
+export default function Input({ onSubmit, setFilters, setExcludeIds, setShownOrder }) {
   const navigate = useNavigate();
   const [ott, setOtt] = useState([]);
   const [genres, setGenres] = useState([]);
@@ -68,6 +68,9 @@ export default function Input({ onSubmit, setFilters, setExcludeIds }) {
     // 새 검색이면 재추천 제외 목록을 비운다
     if (setExcludeIds) {
       setExcludeIds([]);
+    }
+    if (setShownOrder) {
+      setShownOrder(1);
     }
 
     if (onSubmit) {

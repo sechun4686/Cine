@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 import asyncio
 import os
+import time
+import uuid
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -14,6 +16,7 @@ from services.editor_service import build_editor_prompt
 from services.embedding_service import rank_candidates_by_similarity
 from services.llm_service import call_luxia
 from services.rerecommend_service import candidate_key, pick_alternative
+from services import log_service
 from services.tmdb_service import fetch_filtered_pool
 from services.weight_service import infer_weights
 
@@ -49,6 +52,7 @@ class RecommendRequest(BaseModel):
     runtime: int = 120
     query: str = ""
     exclude_ids: list[str] = Field(default_factory=list)   # "movie:123" 형식. 재추천 시 이미 본/거절한 작품
+    participant_id: str = ""                                # 사용자 테스트 참가자 번호 (로그용)
 
 
 class RerecommendRequest(BaseModel):
@@ -56,6 +60,17 @@ class RerecommendRequest(BaseModel):
     feedback: Literal["watched", "not_interested"]
     rejected: dict                                          # 거절한 추천작 (응답의 best 그대로)
     candidates: list[dict] = Field(default_factory=list)    # 남은 평가 완료 후보 (응답의 others 그대로)
+    request_id: str = ""                                    # 로그용: 이 후보들을 평가한 추천 요청
+    participant_id: str = ""
+    shown_order: int | None = None                          # 거절한 작품이 이번 검색에서 몇 번째로 보여준 작품인지
+
+
+class FeedbackRequest(BaseModel):
+    feedback: Literal["accepted", "watched", "not_interested"]
+    item: dict                                              # 피드백을 받은 작품 (응답의 best 그대로)
+    request_id: str = ""
+    participant_id: str = ""
+    shown_order: int | None = None
 
 
 @app.get("/")
@@ -273,6 +288,47 @@ def _log_ranking(ranked: list[dict]) -> None:
 
 @app.post("/api/recommend")
 async def recommend(request: RecommendRequest):
+    """추천 파이프라인 실행 + 결과 로그 저장 (성공/실패 모두 기록)"""
+    request_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    info: dict = {}
+
+    def log_request(status: str, error: str | None = None, best: dict | None = None) -> None:
+        log_service.fire_and_forget(log_service.save("recommendations", [log_service.recommendation_row(
+            request_id=request_id,
+            participant_id=request.participant_id,
+            query=(request.query or "").strip(),
+            filters={"ott": request.ott, "genres": request.genres, "media": request.media,
+                     "runtime": request.runtime},
+            exclude_ids=request.exclude_ids,
+            elapsed_sec=time.perf_counter() - started,
+            status=status,
+            error=error,
+            pool_size=info.get("pool_size"),
+            weight_result=info.get("weight_result"),
+            best=best,
+        )]))
+
+    try:
+        response = await _run_recommend(request, info)
+    except HTTPException as exc:
+        log_request("error", error=f"{exc.status_code}: {exc.detail}")
+        raise
+    except Exception as exc:
+        log_request("error", error=repr(exc)[:500])
+        raise
+
+    ranked = info["ranked"]
+    log_request("ok", best=ranked[0])
+    log_service.fire_and_forget(log_service.save("candidates", log_service.candidate_rows(request_id, ranked)))
+
+    return {"request_id": request_id, **response}
+
+
+async def _run_recommend(request: RecommendRequest, info: dict) -> dict:
+    """
+    추천 파이프라인 본체. info에 로그용 중간 결과(pool_size, weight_result, ranked)를 채운다.
+    """
     if not os.getenv("TMDB_API_KEY"):
         raise HTTPException(status_code=500, detail="TMDB_API_KEY 환경변수가 설정되지 않았습니다.")
     if not os.getenv("LUXIA_API_KEY"):
@@ -315,6 +371,8 @@ async def recommend(request: RecommendRequest):
                 )
 
         weights = weight_result["weights"]
+        info["pool_size"] = len(pool)
+        info["weight_result"] = weight_result
 
         # 2) 유사도 계산 (임베딩 연산이 무거워 별도 스레드에서 실행)
         pool = await asyncio.to_thread(rank_candidates_by_similarity, query, pool)
@@ -330,6 +388,7 @@ async def recommend(request: RecommendRequest):
             raise HTTPException(status_code=502, detail="에이전트 평가 결과가 없습니다.")
 
         _log_ranking(ranked)
+        info["ranked"] = ranked
 
         # 5) Lead Editor 총평 (1위 작품만)
         best = ranked[0]
@@ -365,6 +424,16 @@ async def rerecommend(request: RerecommendRequest):
     """
     pick, note = pick_alternative(request.rejected, request.candidates, request.feedback)
 
+    log_service.fire_and_forget(log_service.save("feedback", [log_service.feedback_row(
+        request_id=request.request_id,
+        participant_id=request.participant_id,
+        feedback=request.feedback,
+        item=request.rejected,
+        shown_order=request.shown_order,
+        next_item=pick,
+        need_new_search=pick is None,
+    )]))
+
     if pick is None:
         return {"need_new_search": True, "note": note}
 
@@ -387,3 +456,16 @@ async def rerecommend(request: RerecommendRequest):
         "best": {**pick, "reason": editor_comment, "editor_comment": editor_comment},
         "others": others,
     }
+
+
+@app.post("/api/feedback")
+async def feedback(request: FeedbackRequest):
+    """'이거 볼래요'처럼 재추천이 필요 없는 피드백을 기록한다."""
+    log_service.fire_and_forget(log_service.save("feedback", [log_service.feedback_row(
+        request_id=request.request_id,
+        participant_id=request.participant_id,
+        feedback=request.feedback,
+        item=request.item,
+        shown_order=request.shown_order,
+    )]))
+    return {"ok": True}
