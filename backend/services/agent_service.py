@@ -60,7 +60,7 @@ FAIL_RESULT = {"score": 5.0, "reason": "평가 실패"}
 
 # 도구 선택은 재현성을 위해 낮은 temperature 사용
 SELECT_TEMPERATURE = 0.1
-EVAL_TEMPERATURE = 0.7
+EVAL_TEMPERATURE = 0.2   # 같은 후보의 점수 편차(재현성)를 줄이기 위해 낮게 설정 (기존 0.7)
 
 
 # ------------------------------------------------------------------
