@@ -1,4 +1,3 @@
-import asyncio
 import json
 import sys
 import types
@@ -86,24 +85,13 @@ def test_candidate_rows_keep_failed_scores_as_null():
 @pytest.fixture
 def captured(monkeypatch):
     rows = []
-    pending = []
 
     async def fake_save(table, items, client=None):
         rows.extend((table, r) for r in items)
         return "file"
 
     monkeypatch.setattr(log_service, "save", fake_save)
-    monkeypatch.setattr(log_service, "fire_and_forget", pending.append)
-
-    def flush():
-        async def run():
-            for coro in pending:
-                await coro
-        asyncio.run(run())
-        pending.clear()
-        return rows
-
-    return flush
+    return lambda: rows
 
 
 def _patch_pipeline(monkeypatch, pool):

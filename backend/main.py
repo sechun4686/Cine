@@ -293,8 +293,8 @@ async def recommend(request: RecommendRequest):
     started = time.perf_counter()
     info: dict = {}
 
-    def log_request(status: str, error: str | None = None, best: dict | None = None) -> None:
-        log_service.fire_and_forget(log_service.save("recommendations", [log_service.recommendation_row(
+    async def log_request(status: str, error: str | None = None, best: dict | None = None) -> None:
+        await log_service.save("recommendations", [log_service.recommendation_row(
             request_id=request_id,
             participant_id=request.participant_id,
             query=(request.query or "").strip(),
@@ -307,20 +307,24 @@ async def recommend(request: RecommendRequest):
             pool_size=info.get("pool_size"),
             weight_result=info.get("weight_result"),
             best=best,
-        )]))
+        )])
 
     try:
         response = await _run_recommend(request, info)
     except HTTPException as exc:
-        log_request("error", error=f"{exc.status_code}: {exc.detail}")
+        await log_request("error", error=f"{exc.status_code}: {exc.detail}")
         raise
     except Exception as exc:
-        log_request("error", error=repr(exc)[:500])
+        await log_request("error", error=repr(exc)[:500])
         raise
 
     ranked = info["ranked"]
-    log_request("ok", best=ranked[0])
-    log_service.fire_and_forget(log_service.save("candidates", log_service.candidate_rows(request_id, ranked)))
+    # 응답 전에 저장을 끝낸다. Cloud Run은 응답 후 CPU를 거의 주지 않아 백그라운드 저장이 유실될 수 있다.
+    # save()는 예외를 던지지 않고, 두 테이블을 동시에 저장해 지연은 0.1~0.3초 수준이다.
+    await asyncio.gather(
+        log_request("ok", best=ranked[0]),
+        log_service.save("candidates", log_service.candidate_rows(request_id, ranked)),
+    )
 
     return {"request_id": request_id, **response}
 
@@ -424,7 +428,7 @@ async def rerecommend(request: RerecommendRequest):
     """
     pick, note = pick_alternative(request.rejected, request.candidates, request.feedback)
 
-    log_service.fire_and_forget(log_service.save("feedback", [log_service.feedback_row(
+    await log_service.save("feedback", [log_service.feedback_row(
         request_id=request.request_id,
         participant_id=request.participant_id,
         feedback=request.feedback,
@@ -432,7 +436,7 @@ async def rerecommend(request: RerecommendRequest):
         shown_order=request.shown_order,
         next_item=pick,
         need_new_search=pick is None,
-    )]))
+    )])
 
     if pick is None:
         return {"need_new_search": True, "note": note}
@@ -461,11 +465,11 @@ async def rerecommend(request: RerecommendRequest):
 @app.post("/api/feedback")
 async def feedback(request: FeedbackRequest):
     """'이거 볼래요'처럼 재추천이 필요 없는 피드백을 기록한다."""
-    log_service.fire_and_forget(log_service.save("feedback", [log_service.feedback_row(
+    await log_service.save("feedback", [log_service.feedback_row(
         request_id=request.request_id,
         participant_id=request.participant_id,
         feedback=request.feedback,
         item=request.item,
         shown_order=request.shown_order,
-    )]))
+    )])
     return {"ok": True}

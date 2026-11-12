@@ -8,8 +8,9 @@ log_service.py
     SUPABASE_SECRET_KEY   Supabase의 secret 키 (또는 예전 이름 service_role 키). 절대 프론트에 넣지 말 것
 
 동작 원칙
-    - 기록은 응답을 막지 않는다 (fire_and_forget으로 백그라운드 실행)
-    - 기록이 실패해도 추천은 정상 동작한다 (예외는 로그만 남김)
+    - 응답을 보내기 전에 저장을 끝낸다. Cloud Run 등은 응답 후 CPU를 거의 주지 않아
+      백그라운드 저장은 유실될 수 있다. 대신 타임아웃을 짧게(5초) 둔다.
+    - 기록이 실패해도 추천은 정상 동작한다 (save는 예외를 던지지 않고 로그만 남김)
     - Supabase 설정이 없거나 저장에 실패하면 logs/<테이블>.jsonl 파일에 대신 저장한다 (데이터 유실 방지)
 """
 
@@ -22,10 +23,8 @@ from pathlib import Path
 import httpx
 
 LOG_DIR = Path(os.getenv("LOG_FILE_DIR") or Path(__file__).resolve().parent.parent / "logs")
-TIMEOUT = 10
+TIMEOUT = 5   # Supabase가 느려도 사용자 응답이 오래 지연되지 않도록
 AGENT_TYPES = ("technical", "narrative", "public")
-
-_background_tasks: set[asyncio.Task] = set()
 
 
 # ------------------------------------------------------------------
@@ -93,13 +92,6 @@ async def _post(client: httpx.AsyncClient, url: str, key: str, table: str, rows:
     if response.status_code >= 400:
         # Supabase가 알려주는 오류 내용(컬럼 이름 오타 등)을 그대로 남긴다
         raise RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
-
-
-def fire_and_forget(coro) -> None:
-    """응답을 기다리게 하지 않고 백그라운드에서 저장한다."""
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)                 # 실행 중 GC되지 않도록 참조 유지
-    task.add_done_callback(_background_tasks.discard)
 
 
 def _now() -> str:
