@@ -1064,3 +1064,64 @@ body {
     right: auto;
   }
 }
+
+/* ---------- 피드백 기반 재추천 ---------- */
+.rerecommend-note {
+  margin: 20px 0 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(53, 184, 208, 0.12);
+  color: #8fd8e6;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.feedback-actions > span {
+  color: #a3a3aa;
+  font-size: 12px;
+}
+
+.feedback-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feedback-button {
+  padding: 10px 16px;
+  border: 1px solid #3b3b40;
+  border-radius: 999px;
+  background: transparent;
+  color: #f3f3f5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.feedback-button:hover:not(:disabled) {
+  border-color: #35b8d0;
+  background: rgba(53, 184, 208, 0.12);
+}
+
+.feedback-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.feedback-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #ff8a80;
+  font-size: 12px;
+}

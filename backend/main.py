@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 import asyncio
 import os
@@ -11,6 +13,7 @@ from services.candidate_service import select_candidates
 from services.editor_service import build_editor_prompt
 from services.embedding_service import rank_candidates_by_similarity
 from services.llm_service import call_luxia
+from services.rerecommend_service import candidate_key, pick_alternative
 from services.tmdb_service import fetch_filtered_pool
 from services.weight_service import infer_weights
 
@@ -45,6 +48,14 @@ class RecommendRequest(BaseModel):
     media: list[str] = Field(default_factory=list)
     runtime: int = 120
     query: str = ""
+    exclude_ids: list[str] = Field(default_factory=list)   # "movie:123" 형식. 재추천 시 이미 본/거절한 작품
+
+
+class RerecommendRequest(BaseModel):
+    query: str = ""
+    feedback: Literal["watched", "not_interested"]
+    rejected: dict                                          # 거절한 추천작 (응답의 best 그대로)
+    candidates: list[dict] = Field(default_factory=list)    # 남은 평가 완료 후보 (응답의 others 그대로)
 
 
 @app.get("/")
@@ -135,7 +146,7 @@ async def search_tmdb(
 #   5) Lead Editor 총평                  editor_service.build_editor_prompt
 # ------------------------------------------------------------------
 POOL_SIZE = 60          # 전체 후보군 크기 (매체가 여러 개면 나눠서 수집)
-OTHERS_COUNT = 3        # best 외에 함께 보여줄 후보 수
+OTHERS_COUNT = 4        # best 외에 함께 보여줄 후보 수 (재추천 후보로도 쓰므로 평가한 후보를 모두 보낸다)
 
 
 def _resolve_media(request: RecommendRequest) -> list[tuple[str, list[str]]]:
@@ -288,6 +299,16 @@ async def recommend(request: RecommendRequest):
                 detail="선택한 조건에 맞는 작품을 찾지 못했습니다. 조건을 바꿔서 다시 시도해 주세요.",
             )
 
+        # 재추천: 이미 추천했거나 거절한 작품 제외
+        if request.exclude_ids:
+            excluded = set(request.exclude_ids)
+            pool = [item for item in pool if candidate_key(item) not in excluded]
+            if not pool:
+                raise HTTPException(
+                    status_code=404,
+                    detail="이 조건에서 더 추천할 작품이 없어요. 조건을 바꿔서 다시 시도해 주세요.",
+                )
+
         weights = weight_result["weights"]
 
         # 2) 유사도 계산 (임베딩 연산이 무거워 별도 스레드에서 실행)
@@ -318,4 +339,46 @@ async def recommend(request: RecommendRequest):
             "reason": weight_result["reason"],
             "status": weight_result["status"],
         },
+    }
+
+def _as_evaluated(item: dict) -> dict:
+    """_format_candidate 형식을 Lead Editor 프롬프트가 쓰는 형식으로 되돌린다."""
+    scores = item.get("scores") or {}
+    reasons = item.get("reasons") or {}
+    return {
+        **item,
+        **{a: {"score": scores.get(a), "reason": reasons.get(a, "")} for a in ("technical", "narrative", "public")},
+    }
+
+
+@app.post("/api/rerecommend")
+async def rerecommend(request: RerecommendRequest):
+    """
+    피드백 기반 재추천. 이미 평가한 후보 중에서 고르므로 에이전트 평가를 다시 하지 않고,
+    새 추천작의 Lead Editor 총평만 생성한다 (LLM 1회).
+    고를 후보가 없으면 need_new_search=True -> 프론트가 exclude_ids를 붙여 /api/recommend를 다시 호출한다.
+    """
+    pick, note = pick_alternative(request.rejected, request.candidates, request.feedback)
+
+    if pick is None:
+        return {"need_new_search": True, "note": note}
+
+    if not os.getenv("LUXIA_API_KEY"):
+        raise HTTPException(status_code=500, detail="LUXIA_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        editor_comment = await _write_editor_comment(client, request.query.strip(), _as_evaluated(pick))
+
+    pick_key = candidate_key(pick)
+    rejected_key = candidate_key(request.rejected)
+    others = [
+        c for c in request.candidates
+        if candidate_key(c) not in (pick_key, rejected_key)
+    ]
+
+    return {
+        "need_new_search": False,
+        "note": note,
+        "best": {**pick, "reason": editor_comment, "editor_comment": editor_comment},
+        "others": others,
     }
