@@ -45,7 +45,7 @@ const AGENTS = [
   },
 ];
 
-async function requestRecommendation(filters, excludeIds = []) {
+async function requestRecommendation(filters, excludeIds = [], participantId = "") {
   if (!filters) {
     throw new Error(
       "추천 입력값을 찾을 수 없습니다. 입력 페이지부터 다시 진행해 주세요."
@@ -64,6 +64,7 @@ async function requestRecommendation(filters, excludeIds = []) {
     runtime: Number(filters.runtime ?? 120),
     query: filters.query ?? "",
     exclude_ids: Array.isArray(excludeIds) ? excludeIds : [],
+    participant_id: participantId || "",
   };
 
   const response = await fetch(`${API_URL}/api/recommend`, {
@@ -96,6 +97,7 @@ async function requestRecommendation(filters, excludeIds = []) {
 export default function Loading({
   filters,
   excludeIds,
+  participantId,
   setResult,
   onComplete,
 }) {
@@ -122,7 +124,7 @@ export default function Loading({
       requestRef.current = {
         filters,
         excludeIds,
-        promise: requestRecommendation(filters, excludeIds),
+        promise: requestRecommendation(filters, excludeIds, participantId),
       };
     }
 
@@ -141,7 +143,7 @@ export default function Loading({
     return () => {
       active = false;
     };
-  }, [filters, excludeIds, setResult]);
+  }, [filters, excludeIds, participantId, setResult]);
 
   // 기존 로딩 애니메이션 유지
   useEffect(() => {
