@@ -255,14 +255,19 @@ def _log_candidates(query: str, pool_size: int, weight_result: dict, candidates:
     print("=" * 70)
 
 
+def _fmt_score(score) -> str:
+    """평가 실패(None)도 로그에 찍을 수 있게 문자열로 바꾼다."""
+    return "실패" if score is None else f"{score:.1f}"
+
+
 def _log_ranking(ranked: list[dict]) -> None:
     """에이전트 평가 후 최종 순위를 터미널에 출력한다."""
     print("[recommend] 최종 순위")
     for i, c in enumerate(ranked, 1):
         print(f"  {i}위 {c.get('title')} [{c.get('label', '-')}]"
               f" | 최종 {c['final_score']:.2f}"
-              f" (T {c['technical']['score']:.1f} / N {c['narrative']['score']:.1f}"
-              f" / P {c['public']['score']:.1f})")
+              f" (T {_fmt_score(c['technical']['score'])} / N {_fmt_score(c['narrative']['score'])}"
+              f" / P {_fmt_score(c['public']['score'])})")
     print("=" * 70 + "\n")
 
 

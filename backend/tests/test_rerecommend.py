@@ -117,3 +117,10 @@ def test_recommend_excludes_ids(monkeypatch):
 
     res = TestClient(main.app).post("/api/recommend", json={"query": "q", "exclude_ids": ["movie:1", "movie:2"]})
     assert res.status_code == 404
+
+
+def test_log_ranking_handles_failed_agent(capsys):
+    item = {"title": "a", "label": "x", "final_score": 7.0,
+            "technical": {"score": 7.0}, "narrative": {"score": None}, "public": {"score": 7.0}}
+    main._log_ranking([item])
+    assert "N 실패" in capsys.readouterr().out
