@@ -205,3 +205,13 @@ def test_rows_match_schema():
 
     for table, row in (("recommendations", rec), ("candidates", cand), ("feedback", fb)):
         assert set(row) <= schema[table], f"{table}: 스키마에 없는 컬럼 {set(row) - schema[table]}"
+
+
+async def test_url_copied_with_rest_v1_suffix_still_works(monkeypatch, log_dir):
+    # Data API 화면에서 복사한 주소에는 /rest/v1이 붙어 있다 -> 예전에는 /rest/v1/rest/v1/... 로 요청해 404(PGRST125)
+    monkeypatch.setenv("SUPABASE_URL", " https://abc.supabase.co/rest/v1/ ")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_xxx")
+    client, seen = _mock_supabase()
+    async with client:
+        assert await log_service.save("feedback", [{"a": 1}], client) == "supabase"
+    assert str(seen[0].url) == "https://abc.supabase.co/rest/v1/feedback"

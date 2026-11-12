@@ -19,7 +19,7 @@
 2. 왼쪽 메뉴 **SQL Editor** → **New query**에 `schema.sql` 내용을 전부 붙여넣고 **Run**을 누릅니다.
 3. **Table Editor**에서 `recommendations`, `candidates`, `feedback` 세 테이블이 생겼는지 확인합니다.
 4. **Project Settings → API Keys**(또는 **API**)에서 두 값을 복사합니다.
-   - Project URL → `SUPABASE_URL`
+   - Project URL → `SUPABASE_URL` (`https://xxxx.supabase.co`. 끝에 `/rest/v1`이 붙어 있어도 괜찮습니다)
    - **secret** 키(`sb_secret_...`) 또는 예전 화면의 **service_role** 키 → `SUPABASE_SECRET_KEY`
    - publishable/anon 키가 아닙니다. secret 키는 서버 전용이라 프론트엔드나 GitHub에 올리면 안 됩니다.
 5. `backend/.env`에 두 값을 추가하고 백엔드를 다시 시작합니다(`.env.example` 참고).

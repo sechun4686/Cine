@@ -32,7 +32,10 @@ _background_tasks: set[asyncio.Task] = set()
 # 저장 (Supabase REST API, 실패 시 파일)
 # ------------------------------------------------------------------
 def _supabase_config() -> tuple[str, str] | None:
-    url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+    # Data API 화면의 주소(https://xxx.supabase.co/rest/v1)를 그대로 넣어도 동작하도록 끝부분을 떼어 낸다
+    if url.endswith("/rest/v1"):
+        url = url[: -len("/rest/v1")]
     key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
     return (url, key) if url and key else None
 
