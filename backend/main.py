@@ -227,6 +227,34 @@ def _format_candidate(item: dict, weights: dict, editor_comment: str = "") -> di
     }
 
 
+def _log_candidates(query: str, pool_size: int, weight_result: dict, candidates: list[dict]) -> None:
+    """선별된 후보 5개를 터미널에 출력한다."""
+    w = weight_result["weights"]
+    print("\n" + "=" * 70)
+    print(f"[recommend] 검색어: {query or '(없음)'} | 후보군 {pool_size}개")
+    print(f"[recommend] 가중치 T {w['technical']:.3f} / N {w['narrative']:.3f} / P {w['public']:.3f}"
+          f" ({weight_result['status']}) 중요도={weight_result['importance']}")
+    print("[recommend] 선별된 후보")
+    for i, c in enumerate(candidates, 1):
+        print(f"  C{i} [{c.get('label', '-')}] {c.get('title')} ({c.get('year') or '-'})"
+              f" | 평점 {float(c.get('vote_average') or 0):.1f}"
+              f" | 투표 {int(c.get('vote_count') or 0):,}"
+              f" | 인기도 {float(c.get('popularity') or 0):.1f}"
+              f" | 유사도 {float(c.get('similarity') or 0):.3f}")
+    print("=" * 70)
+
+
+def _log_ranking(ranked: list[dict]) -> None:
+    """에이전트 평가 후 최종 순위를 터미널에 출력한다."""
+    print("[recommend] 최종 순위")
+    for i, c in enumerate(ranked, 1):
+        print(f"  {i}위 {c.get('title')} [{c.get('label', '-')}]"
+              f" | 최종 {c['final_score']:.2f}"
+              f" (T {c['technical']['score']:.1f} / N {c['narrative']['score']:.1f}"
+              f" / P {c['public']['score']:.1f})")
+    print("=" * 70 + "\n")
+
+
 @app.post("/api/recommend")
 async def recommend(request: RecommendRequest):
     if not os.getenv("TMDB_API_KEY"):
@@ -267,12 +295,15 @@ async def recommend(request: RecommendRequest):
 
         # 3) 후보 5개 선별
         candidates = select_candidates(pool, query)
+        _log_candidates(query, len(pool), weight_result, candidates)
 
         # 4) 에이전트 평가 + 가중치 적용 최종 점수
         ranked = await evaluate_candidates(client, candidates, query, weights)
 
         if not ranked:
             raise HTTPException(status_code=502, detail="에이전트 평가 결과가 없습니다.")
+
+        _log_ranking(ranked)
 
         # 5) Lead Editor 총평 (1위 작품만)
         best = ranked[0]
