@@ -96,9 +96,9 @@ def build_importance_prompt(query: str, refinements: list[str] | None = None) ->
 [결과를 본 사용자가 덧붙인 추가 요청 (번호가 클수록 최근)]
 {lines}
 """
-        refine_rule = """5. 추가 요청은 앞선 추천이 마음에 들지 않아 방향을 바꾸려는 것이야. 원래 검색어보다 추가 요청을 우선하고, 최근 요청일수록 더 중요하게 봐.
-6. 추가 요청이 직접 요구하는 관점(예: '유명한', '인기 있는' -> public / '연출이 좋은', '영상미' -> technical / '이야기가 탄탄한' -> narrative)은 4~5점을 줘.
-7. reason에는 추가 요청을 어떻게 반영했는지도 써.
+        refine_rule = """6. 추가 요청은 앞선 추천이 마음에 들지 않아 방향을 바꾸려는 것이야. 원래 검색어보다 추가 요청을 우선하고, 최근 요청일수록 더 중요하게 봐.
+7. 추가 요청이 직접 요구하는 관점(예: '유명한', '인기 있는' -> public / '연출이 좋은', '영상미' -> technical / '이야기가 탄탄한' -> narrative)은 4~5점을 줘.
+8. reason에는 추가 요청을 어떻게 반영했는지도 써.
 """
     return f"""너는 사용자의 콘텐츠 검색어를 보고, 세 가지 평가 관점이 각각 얼마나 중요한지 판단하는 역할이야.
 
@@ -118,12 +118,18 @@ def build_importance_prompt(query: str, refinements: list[str] | None = None) ->
 2. 키는 technical, narrative, public, reason 네 개만 사용해.
 3. reason에는 점수를 그렇게 준 이유를 1~2문장으로 써.
 4. 아래 JSON 형식 외에 다른 말은 절대 하지 마.
+5. 예시의 점수를 따라 하지 말고, 반드시 사용자 검색어를 보고 새로 판단해.
 {refine_rule}
+[판단 예시 (형식 참고용, 점수는 검색어마다 달라야 함)]
+- "요즘 다들 보는 화제작" -> {{"technical": 1, "narrative": 2, "public": 5, "reason": "화제성과 인기를 직접 요구함"}}
+- "영상미가 압도적인 영화" -> {{"technical": 5, "narrative": 2, "public": 1, "reason": "영상미라는 기술적 요소를 직접 요구함"}}
+- "펑펑 울 수 있는 감동 실화" -> {{"technical": 1, "narrative": 5, "public": 2, "reason": "감정선과 이야기를 핵심으로 요구함"}}
+
 [사용자 검색어]
 {query}
 {refine_block}
-출력 형식:
-{{"technical": 3, "narrative": 4, "public": 2, "reason": "판단 이유"}}
+출력 형식 (<> 부분을 판단한 값으로 채워):
+{{"technical": <0~5 정수>, "narrative": <0~5 정수>, "public": <0~5 정수>, "reason": "<판단 이유>"}}
 """
 
 

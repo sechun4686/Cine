@@ -265,6 +265,7 @@ def _log_candidates(query: str, pool_size: int, weight_result: dict, candidates:
     print(f"[recommend] 검색어: {query or '(없음)'} | 후보군 {pool_size}개")
     print(f"[recommend] 가중치 T {w['technical']:.3f} / N {w['narrative']:.3f} / P {w['public']:.3f}"
           f" ({weight_result['status']}) 중요도={weight_result['importance']}")
+    print(f"[recommend] 가중치 근거: {weight_result.get('reason') or '-'}")
     print("[recommend] 선별된 후보")
     for i, c in enumerate(candidates, 1):
         print(f"  C{i} [{c.get('label', '-')}] {c.get('title')} ({c.get('year') or '-'})"
