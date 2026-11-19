@@ -111,7 +111,7 @@ async def test_single_uses_exactly_the_data_multi_selected(monkeypatch):
     ranked = await single.evaluate_candidates_single(
         None, [{"title": "A작품"}], "q", None, tool_data_list=[data])
 
-    data_block = prompts[0].split("[수집된 데이터]")[1].split("[출력 규칙]")[0]
+    data_block = prompts[0].rsplit("[수집된 데이터]", 1)[1].split("[출력 규칙]")[0]
     for value in ("감독X", "필모Y", "줄거리Z", "평점W"):
         assert value in data_block
     for unselected in ("주요 출연진", "제작사", "키워드", "관객 리뷰"):   # multi가 고르지 않은 도구
