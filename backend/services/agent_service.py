@@ -34,14 +34,14 @@ Technical / Narrative / Public 에이전트 평가 서비스 (LangGraph StateGra
 """
 
 import asyncio
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 import httpx
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
 from .agent_prompts import build_prompt, build_select_prompt
-from .agent_tools import ToolContext, run_tools, validate_tools
+from .agent_tools import TOOL_REGISTRY, ToolContext, run_tools, validate_tools
 from .llm_service import call_luxia, extract_json
 from .tmdb_details import attach_details
 
@@ -74,6 +74,7 @@ EVAL_TEMPERATURE = 0.2   # 같은 후보의 점수 편차(재현성)를 줄이�
 # ------------------------------------------------------------------
 class EvalState(TypedDict, total=False):
     candidate: dict          # 평가할 후보 1개
+    index: int               # 후보 순번 (진행 이벤트용)
     details: dict            # 후보의 TMDB 상세정보 (credits, keywords, reviews 포함)
     query: str               # 사용자 검색어
     weights: dict | None     # 최종 점수 가중치 (None이면 기본값)
@@ -204,25 +205,57 @@ def calculate_final_score(scores: dict, weights: dict | None = None) -> float | 
 
 
 # ------------------------------------------------------------------
+# 진행 이벤트 (로딩 화면 연동용)
+# ------------------------------------------------------------------
+ProgressCallback = Callable[[dict], None]
+
+
+def _emit(on_progress: ProgressCallback | None, event: dict) -> None:
+    """진행 이벤트를 보낸다. 콜백 오류가 평가를 멈추지 않게 한다."""
+    if on_progress is None:
+        return
+    try:
+        on_progress(event)
+    except Exception as e:
+        print(f"[agent_service] 진행 이벤트 전송 실패: {e!r}")
+
+
+# ------------------------------------------------------------------
 # LangGraph 구성
 # ------------------------------------------------------------------
-def build_graph(client: httpx.AsyncClient, semaphore: asyncio.Semaphore, person_cache: dict):
+def build_graph(
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    person_cache: dict,
+    on_progress: ProgressCallback | None = None,
+):
     """에이전트 3개를 병렬 노드로, 점수 계산을 마지막 노드로 하는 그래프를 만든다."""
 
     def make_agent_node(agent_type: str):
         async def agent_node(state: EvalState) -> dict:
             candidate = state["candidate"]
             query = state["query"]
+            base_event = {
+                "type": "agent",
+                "agent": agent_type,
+                "index": state.get("index", 0),
+                "title": candidate.get("title"),
+            }
 
             # 1) 도구 선택 + 2) 검증
             plan = await select_tools(client, candidate, query, agent_type, semaphore)
+            labels = [TOOL_REGISTRY[agent_type][t]["label"] for t in plan["tools"]]
+            _emit(on_progress, {**base_event, "phase": "tools_selected", "tools": labels})
 
             # 3) 도구 실행
             ctx = ToolContext(client, candidate, state.get("details", {}), person_cache)
             tool_data, failed = await run_tools(ctx, agent_type, plan["tools"])
+            _emit(on_progress, {**base_event, "phase": "data_ready"})
 
             # 4) 평가
             result = await score_candidate(client, candidate, query, agent_type, tool_data, semaphore)
+            _emit(on_progress, {**base_event, "phase": "scored",
+                                "score": result["score"], "failed": result["failed"]})
 
             # 자기 키만 State에 쓴다
             return {
@@ -258,10 +291,14 @@ async def evaluate_candidates(
     candidates: list[dict],
     query: str,
     weights: dict | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> list[dict]:
     """
     candidates : candidate_service.select_candidates() 결과
     weights    : 최종 점수 가중치 (None이면 35:35:30)
+    on_progress: 진행 이벤트 콜백 (선택). 에이전트 단계마다
+                 {"type": "agent", "agent", "index", "title", "phase", ...} 를 받는다
+                 phase: tools_selected -> data_ready -> scored
     return     : final_score 내림차순으로 정렬된 후보 리스트
     """
     if not candidates:
@@ -269,15 +306,16 @@ async def evaluate_candidates(
 
     # 1) TMDB 상세정보 한 번에 받아오기 (도구들이 공유)
     all_details = await attach_details(client, candidates)
+    _emit(on_progress, {"type": "stage", "stage": "details", "status": "done"})
 
     # 2) 후보마다 그래프를 한 번씩 실행 (후보끼리도 병렬)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_CALLS)
     person_cache: dict = {}
-    graph = build_graph(client, semaphore, person_cache)
+    graph = build_graph(client, semaphore, person_cache, on_progress)
 
     final_states = await asyncio.gather(*(
-        graph.ainvoke({"candidate": c, "details": d, "query": query, "weights": weights})
-        for c, d in zip(candidates, all_details)
+        graph.ainvoke({"candidate": c, "index": i, "details": d, "query": query, "weights": weights})
+        for i, (c, d) in enumerate(zip(candidates, all_details))
     ))
 
     # 3) 그래프 결과를 후보 dict에 붙인다

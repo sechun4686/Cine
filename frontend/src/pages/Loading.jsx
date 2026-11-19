@@ -1,9 +1,14 @@
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_URL } from "../constants";
 import "./Loading.css";
 import { TechnicalIcon, NarrativeIcon, PublicIcon } from "../components/AgentIcons";
+import { requestRecommendationStream } from "../api/recommendStream";
+import {
+  agentView,
+  headline,
+  initialProgress,
+  progressReducer,
+} from "./loadingProgress";
 
 const AGENTS = [
   {
@@ -11,88 +16,36 @@ const AGENTS = [
     Icon: TechnicalIcon,
     name: "Technical 에이전트",
     desc: "기술적 완성도 평가",
-    speed: 1500,
-    steps: [
-      ["감독 연출 역량 분석 중...", "감독 연출 역량 분석 완료"],
-      ["촬영·영상미 평가 중...", "촬영·영상미 평가 완료"],
-      ["제작 완성도 점수 계산 중...", "제작 완성도 점수 계산 완료"],
-    ],
   },
   {
     id: "narrative",
     Icon: NarrativeIcon,
     name: "Narrative 에이전트",
     desc: "서사·감성 평가",
-    speed: 1900,
-    steps: [
-      ["줄거리 구조 분석 중...", "줄거리 구조 분석 완료"],
-      ["캐릭터 감성선 평가 중...", "캐릭터 감성선 평가 완료"],
-      ["요청 키워드 부합도 확인 중...", "요청 키워드 부합도 확인 완료"],
-      ["서사 점수 계산 중...", "서사 점수 계산 완료"],
-    ],
   },
   {
     id: "public",
     Icon: PublicIcon,
     name: "Public 에이전트",
-    desc: "대중성·트렌드 평가",
-    speed: 1700,
-    steps: [
-      ["평점 신뢰도 확인 중...", "평점 신뢰도 확인 완료"],
-      ["인기도·관객 반응 분석 중...", "인기도·관객 반응 분석 완료"],
-      ["트렌드 부합도 평가 중...", "트렌드 부합도 평가 완료"],
-      ["대중성 점수 계산 중...", "대중성 점수 계산 완료"],
-    ],
+    desc: "대중성 평가",
   },
 ];
 
-async function requestRecommendation(filters, excludeIds = [], participantId = "") {
-  if (!filters) {
-    throw new Error(
-      "추천 입력값을 찾을 수 없습니다. 입력 페이지부터 다시 진행해 주세요."
-    );
-  }
-
-  const payload = {
-    ...filters,
-    ott: Array.isArray(filters.ott) ? filters.ott : [],
-    genres: Array.isArray(filters.genres) ? filters.genres : [],
-    media: Array.isArray(filters.media)
-      ? filters.media
-      : filters.media
-        ? [filters.media]
-        : [],
-    runtime: Number(filters.runtime ?? 120),
-    query: filters.query ?? "",
-    exclude_ids: Array.isArray(excludeIds) ? excludeIds : [],
-    participant_id: participantId || "",
-  };
-
-  const response = await fetch(`${API_URL}/api/recommend`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      typeof data.detail === "string"
-        ? data.detail
-        : `추천 API 오류 (${response.status})`
-    );
-  }
-
-  if (!data.best) {
-    throw new Error(
-      "추천 결과 형식이 예상과 다릅니다. 백엔드 응답을 확인해 주세요."
-    );
-  }
-
-  return data;
+// 요청 하나와 그 진행 이벤트를 묶어 둔다.
+// 개발 모드의 StrictMode는 effect를 두 번 실행한다. 같은 filters면 진행 중인 요청을 재사용하고,
+// 다시 구독할 때는 지금까지 받은 이벤트를 처음부터 다시 적용한다.
+function startJob(filters, excludeIds, participantId) {
+  const job = { filters, excludeIds, events: [], listeners: new Set() };
+  job.promise = requestRecommendationStream(
+    filters,
+    excludeIds,
+    participantId,
+    (event) => {
+      job.events.push(event);
+      job.listeners.forEach((listener) => listener(event));
+    }
+  );
+  return job;
 }
 
 export default function Loading({
@@ -104,75 +57,50 @@ export default function Loading({
 }) {
   const navigate = useNavigate();
 
-  const [completed, setCompleted] = useState(() =>
-    Object.fromEntries(AGENTS.map((agent) => [agent.id, 0]))
-  );
-  const [requestError, setRequestError] = useState("");
-  const [resultReady, setResultReady] = useState(false);
+  const [progress, dispatch] = useReducer(progressReducer, undefined, initialProgress);
+  const jobRef = useRef(null);
 
-  // 백엔드에 실제 추천 요청
-  // 개발 모드의 StrictMode는 effect를 두 번 실행한다. 예전에는 첫 요청을 abort해도
-  // 백엔드는 끝까지 처리해서 LLM 호출이 두 배가 됐다. 같은 filters면 진행 중인 요청을 재사용한다.
-  const requestRef = useRef(null);
-
+  // 백엔드에 실제 추천 요청 + 진행 이벤트 구독
   useEffect(() => {
     let active = true;
 
-    const current = requestRef.current;
+    const current = jobRef.current;
     if (current?.filters !== filters || current?.excludeIds !== excludeIds) {
-      setRequestError("");
-      setResultReady(false);
-      requestRef.current = {
-        filters,
-        excludeIds,
-        promise: requestRecommendation(filters, excludeIds, participantId),
-      };
+      jobRef.current = startJob(filters, excludeIds, participantId);
     }
+    const job = jobRef.current;
 
-    requestRef.current.promise
+    dispatch({ type: "reset" });
+    job.events.forEach(dispatch);
+    job.listeners.add(dispatch);
+
+    job.promise
       .then((data) => {
         if (!active) return;
         setResult(data);
-        setResultReady(true);
+        dispatch({ type: "finished" });
       })
       .catch((error) => {
         if (!active) return;
         console.error("추천 API 호출 실패:", error);
-        setRequestError(error.message || "서버에 연결하지 못했습니다.");
+        dispatch({
+          type: "error",
+          message: error.message || "서버에 연결하지 못했습니다.",
+        });
       });
 
     return () => {
       active = false;
+      job.listeners.delete(dispatch);
     };
   }, [filters, excludeIds, participantId, setResult]);
 
-  // 기존 로딩 애니메이션 유지
+  const requestError = progress.error;
+  const resultReady = progress.finished;
+
+  // 결과를 받으면 완료 상태를 잠깐 보여준 뒤 이동
   useEffect(() => {
-    const timers = AGENTS.map((agent) =>
-      setInterval(() => {
-        setCompleted((previous) => {
-          if (previous[agent.id] >= agent.steps.length) {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            [agent.id]: previous[agent.id] + 1,
-          };
-        });
-      }, agent.speed)
-    );
-
-    return () => timers.forEach(clearInterval);
-  }, []);
-
-  const allDone = AGENTS.every(
-    (agent) => completed[agent.id] >= agent.steps.length
-  );
-
-  // 애니메이션과 실제 추천 요청이 모두 끝나야 이동
-  useEffect(() => {
-    if (!allDone || !resultReady || requestError) return;
+    if (!resultReady || requestError) return;
 
     const timer = setTimeout(() => {
       if (onComplete) {
@@ -183,7 +111,7 @@ export default function Loading({
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [allDone, resultReady, requestError, onComplete, navigate]);
+  }, [resultReady, requestError, onComplete, navigate]);
 
   return (
     <div className="loading-page">
@@ -198,19 +126,14 @@ export default function Loading({
           <p className="loading-subtitle">
             {requestError
               ? "아래 오류를 확인하고 다시 시도해 주세요."
-              : "3개의 AI 에이전트가 각자의 관점에서 작품을 평가하고 있습니다"}
+              : headline(progress)}
           </p>
         </header>
 
         <div className="loading-cards">
           {AGENTS.map((agent) => {
-            const total = agent.steps.length;
-            const doneCount = completed[agent.id];
-            const done = doneCount >= total;
-            const visibleCount = done ? total : doneCount + 1;
-            const progress = done
-              ? 100
-              : ((doneCount + 0.5) / total) * 100;
+            const view = agentView(progress, agent.id);
+            const { done } = view;
 
             return (
               <section
@@ -240,35 +163,43 @@ export default function Loading({
                 </div>
 
                 <ul className="loading-steps">
-                  {agent.steps
-                    .slice(0, visibleCount)
-                    .map(([doing, finished], index) => {
-                      const stepDone = index < doneCount;
-
-                      return (
-                        <li
-                          key={doing}
-                          className={`loading-step ${
-                            stepDone ? "is-done" : "is-active"
-                          }`}
-                        >
-                          <span className="loading-step-mark">
-                            {stepDone ? (
-                              "✓"
-                            ) : (
-                              <span className="loading-step-spinner" />
-                            )}
-                          </span>
-                          {stepDone ? finished : doing}
-                        </li>
-                      );
-                    })}
+                  {view.steps.map((step, index) => (
+                    <li
+                      key={index}
+                      className={`loading-step ${
+                        step.done ? "is-done" : "is-active"
+                      }`}
+                    >
+                      <span className="loading-step-mark">
+                        {step.done ? (
+                          "✓"
+                        ) : (
+                          <span className="loading-step-spinner" />
+                        )}
+                      </span>
+                      {step.text}
+                    </li>
+                  ))}
                 </ul>
 
-                <div className="loading-bar">
+                <div
+                  className={`loading-bar ${
+                    view.progress === null ? "is-indeterminate" : ""
+                  }`}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={
+                    view.progress === null ? undefined : Math.round(view.progress)
+                  }
+                >
                   <div
                     className="loading-bar-fill"
-                    style={{ width: `${progress}%` }}
+                    style={
+                      view.progress === null
+                        ? undefined
+                        : { width: `${view.progress}%` }
+                    }
                   />
                 </div>
               </section>
@@ -295,4 +226,3 @@ export default function Loading({
     </div>
   );
 }
-

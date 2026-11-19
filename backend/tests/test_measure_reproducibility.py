@@ -64,7 +64,7 @@ def test_full_run_with_fake_pipeline(monkeypatch, tmp_path):
     async def fake_weights(client, query):
         return {"weights": {"technical": .3, "narrative": .4, "public": .3}, "importance": {}, "status": "ok"}
 
-    async def fake_eval(client, candidates, query, weights):
+    async def fake_eval(client, candidates, query, weights, **kwargs):
         calls["eval"] += 1
         bump = calls["eval"] % 2            # 회차마다 점수가 달라지게
         return [{**c, "final_score": 9 - i,
