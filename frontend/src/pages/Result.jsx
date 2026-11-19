@@ -11,6 +11,7 @@ import {
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_URL } from '../constants'
+import { IconHome } from '../components/Icons'
 import '../main.css'
 
 const FEEDBACK_OPTIONS = [
@@ -76,6 +77,7 @@ function Result({
   result,
   setResult,
   filters,
+  setFilters,
   excludeIds = [],
   setExcludeIds,
   participantId = '',
@@ -89,6 +91,8 @@ function Result({
   const [feedbackError, setFeedbackError] = useState('')
   const [acceptedKey, setAcceptedKey] = useState('')
   const accepted = Boolean(best) && acceptedKey === candidateKey(best)
+  const [refineOpen, setRefineOpen] = useState(false)
+  const [refineText, setRefineText] = useState('')
 
   // '이거 볼래요': 재추천 없이 기록만 남긴다 (첫 추천 수락률 분석용)
   async function handleAccept() {
@@ -148,6 +152,7 @@ function Result({
       if (data.need_new_search) {
         // 남은 후보가 마땅치 않음 -> 이번에 평가한 작품을 모두 빼고 새로 검색
         setExcludeIds?.([...new Set([...nextExclude, ...others.map(candidateKey)])])
+        setFilters?.({ ...filters, parent_request_id: result?.request_id ?? '' })
         navigate('/loading')
         return
       }
@@ -166,6 +171,39 @@ function Result({
     } finally {
       setPendingFeedback('')
     }
+  }
+
+  // 추가 요청으로 다시 추천받기: 원래 요청에 덧붙이고, 이번에 보여준 작품(1위 + 함께 보여준 후보)을 모두 빼고 새로 검색
+  function handleRefine(event) {
+    event.preventDefault()
+    const text = refineText.trim()
+    if (!best || !text || pendingFeedback) return
+
+    // 기록은 기다리지 않는다 (실패해도 재검색은 진행)
+    fetch(`${API_URL}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feedback: 'refine',
+        item: best,
+        text,
+        request_id: result?.request_id ?? '',
+        participant_id: participantId,
+        shown_order: shownOrder,
+      }),
+    }).catch((error) => console.error('피드백 기록 실패:', error))
+
+    const baseQuery = (filters?.query ?? '').trim()
+    setFilters?.({
+      ...filters,
+      query: baseQuery ? `${baseQuery}, ${text}` : text,
+      parent_request_id: result?.request_id ?? '',
+    })
+    setExcludeIds?.([...new Set([...excludeIds, candidateKey(best), ...others.map(candidateKey)])])
+    setShownOrder?.(shownOrder + 1)
+    setRefineOpen(false)
+    setRefineText('')
+    navigate('/loading')
   }
 
   if (!best) {
@@ -430,11 +468,54 @@ function Result({
       )}
 
       <footer className="result-footer">
-        <p>이 추천이 마음에 드시나요?</p>
-        <span>입력 조건을 바꿔 새로운 작품을 발견해 보세요.</span>
-        <button type="button" onClick={() => navigate('/input')}>
-          다시 추천받기 <span>↻</span>
-        </button>
+        <div className="result-footer-top">
+          <div>
+            <p>이 추천이 마음에 드시나요?</p>
+            <span>원하는 조건을 덧붙여 다시 추천받아 보세요.</span>
+          </div>
+          <div className="result-footer-actions">
+            <button type="button" className="footer-home" onClick={() => navigate('/')}>
+              <IconHome size={16} /> 처음으로
+            </button>
+            <button
+              type="button"
+              className="footer-refine-toggle"
+              aria-expanded={refineOpen}
+              aria-controls="refine-panel"
+              onClick={() => setRefineOpen((open) => !open)}
+            >
+              다시 추천받기
+            </button>
+          </div>
+        </div>
+
+        {refineOpen && (
+          <form id="refine-panel" className="refine-panel" onSubmit={handleRefine}>
+            {filters?.query && (
+              <p className="refine-base">
+                <strong>지금까지의 요청</strong> {filters.query}
+              </p>
+            )}
+            <label htmlFor="refine-input">덧붙일 조건</label>
+            <div className="refine-row">
+              <input
+                id="refine-input"
+                type="text"
+                value={refineText}
+                maxLength={100}
+                autoFocus
+                placeholder="예: 좀 더 최근 작품으로, 너무 무겁지 않게"
+                onChange={(event) => setRefineText(event.target.value)}
+              />
+              <button type="submit" disabled={!refineText.trim() || Boolean(pendingFeedback)}>
+                이렇게 다시 추천받기
+              </button>
+            </div>
+            <span className="refine-hint">
+              이번에 보여드린 작품은 빼고 새로 찾아요.
+            </span>
+          </form>
+        )}
       </footer>
     </div>
   )

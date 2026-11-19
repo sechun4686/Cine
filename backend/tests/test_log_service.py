@@ -203,3 +203,38 @@ async def test_url_copied_with_rest_v1_suffix_still_works(monkeypatch, log_dir):
     async with client:
         assert await log_service.save("feedback", [{"a": 1}], client) == "supabase"
     assert str(seen[0].url) == "https://abc.supabase.co/rest/v1/feedback"
+
+
+# ------------------------------------------------------------------
+# 추가 요청으로 다시 추천받기 (refine)
+# ------------------------------------------------------------------
+def test_refine_feedback_and_followup_search_are_linked(monkeypatch, captured):
+    _patch_pipeline(monkeypatch, [{"id": i, "media_type": "movie", "title": f"m{i}", "overview": "x"}
+                                  for i in range(3)])
+    tc = TestClient(main.app)
+    best = {"id": 1, "media_type": "movie", "title": "A"}
+
+    tc.post("/api/feedback", json={"feedback": "refine", "item": best, "text": " 좀 더 최근 작품 ",
+                                   "request_id": "r1", "participant_id": "P03", "shown_order": 1})
+    tc.post("/api/recommend", json={"query": "힐링, 좀 더 최근 작품", "exclude_ids": ["movie:1"],
+                                    "parent_request_id": "r1", "participant_id": "P03"})
+    rows = captured()
+
+    fb = [r for t, r in rows if t == "feedback"][0]
+    rec = [r for t, r in rows if t == "recommendations"][0]
+    assert fb["feedback"] == "refine" and fb["refine_text"] == "좀 더 최근 작품"
+    assert rec["parent_request_id"] == "r1" and rec["query"] == "힐링, 좀 더 최근 작품"
+
+
+def test_new_columns_only_sent_when_present():
+    # 마이그레이션 전 DB에서도 일반 로그가 저장되도록, 값이 없으면 새 컬럼 키를 보내지 않는다
+    rec = log_service.recommendation_row("rid", "P1", "q", {}, [], 1.0)
+    fb = log_service.feedback_row("rid", "P1", "accepted", {"id": 1}, text="")
+    assert "parent_request_id" not in rec and "refine_text" not in fb
+
+
+def test_refine_rows_match_schema():
+    schema = _schema_columns()
+    rec = log_service.recommendation_row("rid", "P1", "q", {}, [], 1.0, parent_request_id="prev")
+    fb = log_service.feedback_row("rid", "P1", "refine", {"id": 1}, text="더 밝게")
+    assert set(rec) <= schema["recommendations"] and set(fb) <= schema["feedback"]
