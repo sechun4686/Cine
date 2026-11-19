@@ -184,7 +184,8 @@ body {
 
 
 /*
-  "무엇을 볼지" 밑줄
+  "무엇을 볼지" 밑줄 — 손으로 그은 듯한 두 겹 획 (SVG)
+  처음 화면에 들어올 때 왼쪽에서 오른쪽으로 그려진다
 */
 
 .hero-left h1 span::after {
@@ -192,14 +193,31 @@ body {
 
   position: absolute;
 
-  left: 0;
-  right: 0;
+  left: -4px;
+  right: -6px;
 
-  bottom: -7px;
+  bottom: -14px;
 
-  height: 2px;
+  height: 16px;
 
-  background: #35afd0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 16' preserveAspectRatio='none'%3E%3Cpath d='M3 10 C 55 5, 105 12, 160 8 S 255 4, 297 7' fill='none' stroke='%2335afd0' stroke-width='3.2' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3Cpath d='M18 13 C 85 10, 170 12, 282 10' fill='none' stroke='%2335afd0' stroke-opacity='0.55' stroke-width='2' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+
+  animation: hero-underline-draw 0.9s cubic-bezier(0.65, 0, 0.35, 1) 0.3s both;
+}
+
+@keyframes hero-underline-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-left h1 span::after {
+    animation: none;
+  }
 }
 
 
