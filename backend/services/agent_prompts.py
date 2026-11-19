@@ -125,3 +125,48 @@ def build_prompt(candidate: dict, query: str, agent_type: str, tool_data: dict) 
         "출력 형식:\n"
         '{"reason": "평가 근거 3~4문장", "score": 0.0~10.0 사이 숫자}\n'
     )
+
+# ------------------------------------------------------------------
+# 5) Single-agent 비교 실험용 평가 프롬프트
+#    multi-agent와 같은 평가 기준(_ROLE_PROMPTS), 데이터 규칙, 점수 기준을 쓰되
+#    LLM 한 번 호출로 세 관점을 모두 평가한다.
+# ------------------------------------------------------------------
+_SINGLE_SECTION_TITLES = {
+    "technical": "기술적 완성도",
+    "narrative": "서사",
+    "public": "대중성",
+}
+
+
+def _format_all_tool_data(tool_data: dict) -> str:
+    """tool_data: {관점: {도구명: 값}} -> 관점별로 묶은 데이터 블록"""
+    blocks = []
+    for agent_type, data in tool_data.items():
+        registry = TOOL_REGISTRY[agent_type]
+        lines = [f"- {registry[name]['label']}: {value}" for name, value in data.items()]
+        blocks.append(f"({_SINGLE_SECTION_TITLES[agent_type]} 관련)\n" + "\n".join(lines))
+    return "[수집된 데이터]\n" + "\n\n".join(blocks) + "\n"
+
+
+def build_single_prompt(candidate: dict, query: str, tool_data: dict) -> str:
+    criteria = "\n\n".join(
+        f"[{key}: {_SINGLE_SECTION_TITLES[key]} 평가 기준]\n{_ROLE_PROMPTS[key]}"
+        for key in _SINGLE_SECTION_TITLES
+    )
+    return (
+        "너는 영화·드라마를 기술적 완성도, 서사, 대중성 세 관점에서 평가하는 전문가야.\n"
+        "아래 세 관점의 평가 기준에 따라 이 작품이 사용자 요청에 맞는지 관점마다 따로 평가해.\n\n"
+        f"{criteria}\n\n"
+        f"{_DATA_RULES}\n"
+        f"{_SCORE_RULES}\n"
+        f"{_base_info(candidate, query)}\n"
+        f"{_format_all_tool_data(tool_data)}\n"
+        "[출력 규칙]\n"
+        "- 관점마다 reason은 3~4문장으로 써.\n"
+        "- 최상위 키는 technical, narrative, public 세 개만 사용하고, 각각 reason과 score를 가져.\n"
+        "- JSON 외에 다른 말은 절대 하지 마.\n\n"
+        "출력 형식:\n"
+        '{"technical": {"reason": "평가 근거 3~4문장", "score": 0.0~10.0 사이 숫자}, '
+        '"narrative": {"reason": "...", "score": 숫자}, '
+        '"public": {"reason": "...", "score": 숫자}}\n'
+    )
