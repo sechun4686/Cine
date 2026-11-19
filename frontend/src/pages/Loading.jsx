@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL } from "../constants";
 import "./Loading.css";
+import { TechnicalIcon, NarrativeIcon, PublicIcon } from "../components/AgentIcons";
 
 const AGENTS = [
   {
     id: "technical",
-    icon: "🎬",
+    Icon: TechnicalIcon,
     name: "Technical 에이전트",
     desc: "기술적 완성도 평가",
     speed: 1500,
@@ -19,7 +20,7 @@ const AGENTS = [
   },
   {
     id: "narrative",
-    icon: "📖",
+    Icon: NarrativeIcon,
     name: "Narrative 에이전트",
     desc: "서사·감성 평가",
     speed: 1900,
@@ -32,7 +33,7 @@ const AGENTS = [
   },
   {
     id: "public",
-    icon: "👥",
+    Icon: PublicIcon,
     name: "Public 에이전트",
     desc: "대중성·트렌드 평가",
     speed: 1700,
@@ -219,7 +220,9 @@ export default function Loading({
                 }`}
               >
                 <div className="loading-card-top">
-                  <div className="loading-icon">{agent.icon}</div>
+                  <div className="loading-icon">
+                    <agent.Icon />
+                  </div>
                   <div className="loading-info">
                     <h2 className="loading-agent-name">{agent.name}</h2>
                     <p className="loading-status">
