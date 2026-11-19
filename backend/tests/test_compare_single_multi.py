@@ -66,11 +66,30 @@ def test_build_survey_is_blind_reproducible_and_keyed():
 
     for word in ("multi", "single", "Multi", "Single", "에이전트"):
         assert word not in md                                   # 참가자 자료에 방식 이름이 없다
-    assert {k["A"] for k in key} == {"multi", "single"}         # 6문항이면 A 배치가 섞인다
+    assert sum(k["A"] == "multi" for k in key) == 3            # 6문항이면 정확히 절반씩
     for k in key:
         assert k["A_title"].startswith("M" if k["A"] == "multi" else "S")
         assert f"### 결과 A: {k['A_title']}" in md
-    assert "**기술적 완성도 (8.0점)**: M0-technical 근거" in md
+    assert "**기술적 완성도**: M0-technical 근거" in md           # 기본은 점수 숨김
+    assert "점)" not in md
+
+    md_scores, _ = cmp.build_survey(items, seed=1, show_scores=True)
+    assert "**기술적 완성도 (8.0점)**: M0-technical 근거" in md_scores
+
+
+def test_build_survey_balances_odd_count():
+    items = [{"query": f"요청{i}", "multi": _cand(f"M{i}", 8), "single": _cand(f"S{i}", 7)} for i in range(5)]
+    for seed in range(20):
+        _, key = cmp.build_survey(items, seed=seed)
+        assert sum(k["A"] == "multi" for k in key) == 3
+
+
+def test_short_overview_cuts_at_sentence_end():
+    assert cmp.short_overview("짧은 줄거리.") == "짧은 줄거리."
+    long_text = "첫 문장입니다. " * 8 + "마지막 문장이 길게 이어지고 있다"
+    out = cmp.short_overview(long_text, limit=60)
+    assert out.endswith("입니다.") and len(out) <= 60
+    assert cmp.short_overview("가" * 200, limit=50) == "가" * 50 + "…"
 
 
 def test_full_run_single_gets_multi_data(monkeypatch, tmp_path):

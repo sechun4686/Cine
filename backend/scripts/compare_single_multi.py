@@ -144,14 +144,20 @@ def summarize_cost(run_rows: list[dict]) -> dict:
     return result
 
 
-def build_survey(items: list[dict], seed: int = 0) -> tuple[str, list[dict]]:
+def build_survey(items: list[dict], seed: int = 0, show_scores: bool = False) -> tuple[str, list[dict]]:
     """
     items: 쿼리마다 {"query", "multi": 1위 후보 dict, "single": 1위 후보 dict}
            후보 dict = {"title", "overview", "technical": {"score","reason"}, "narrative", "public"}
     return: (참가자용 마크다운, 정답표 행 목록)
-    A/B 배치는 seed로 쿼리마다 무작위로 정한다 (같은 seed면 같은 배치).
+
+    A/B 배치: multi가 A인 문항 수를 절반(홀수면 ±1)으로 맞춘 뒤 seed로 순서를 섞는다
+              (한쪽이 A에 몰리면 위치 효과가 섞인다)
+    show_scores: 기본 False. single이 점수를 평균 1점가량 후하게 주므로, 숫자를 보여주면
+                 참가자가 근거가 아니라 점수 크기로 고를 수 있다.
     """
     rng = random.Random(seed)
+    multi_first = [True] * ((len(items) + 1) // 2) + [False] * (len(items) // 2)
+    rng.shuffle(multi_first)
     lines = [
         "# 추천 결과 비교 설문 자료",
         "",
@@ -160,9 +166,8 @@ def build_survey(items: list[dict], seed: int = 0) -> tuple[str, list[dict]]:
     ]
     key_rows = []
 
-    for no, item in enumerate(items, 1):
-        order = list(MODES)
-        rng.shuffle(order)
+    for no, (item, first) in enumerate(zip(items, multi_first), 1):
+        order = ["multi", "single"] if first else ["single", "multi"]
         same = item["multi"]["title"] == item["single"]["title"]
         key_rows.append({"question": no, "query": item["query"], "A": order[0], "B": order[1],
                          "same_title": same, "A_title": item[order[0]]["title"],
@@ -176,8 +181,10 @@ def build_survey(items: list[dict], seed: int = 0) -> tuple[str, list[dict]]:
                 lines += [f"> {c['overview']}", ""]
             for agent in AGENT_TYPES:
                 ev = c.get(agent) or {}
-                score = "-" if ev.get("score") is None else f"{ev['score']:.1f}점"
-                lines.append(f"- **{AGENT_LABELS[agent]} ({score})**: {ev.get('reason', '-')}")
+                label = AGENT_LABELS[agent]
+                if show_scores:
+                    label += " (-)" if ev.get("score") is None else f" ({ev['score']:.1f}점)"
+                lines.append(f"- **{label}**: {ev.get('reason', '-')}")
             lines.append("")
     return "\n".join(lines), key_rows
 
@@ -291,8 +298,20 @@ def _csv_row(row: dict) -> dict:
             "importance": json.dumps(row["importance"]), "weights": json.dumps(row["weights"])}
 
 
+def short_overview(text: str, limit: int = 160) -> str:
+    """줄거리를 limit자 안에서 문장 끝으로 자른다. 문장 끝이 없으면 자르고 '…'를 붙인다."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("다. "), cut.rfind("."))
+    if end >= limit // 2:
+        return cut[: end + 1].strip()
+    return cut.rstrip() + "…"
+
+
 def _survey_candidate(c: dict) -> dict:
-    return {"title": c.get("title"), "overview": (c.get("overview") or "")[:150],
+    return {"title": (c.get("title") or "").strip(), "overview": short_overview(c.get("overview")),
             **{a: {"score": c[a].get("score"), "reason": c[a].get("reason", "")} for a in AGENT_TYPES}}
 
 
@@ -415,7 +434,7 @@ async def run(args) -> None:
                          {m: summarize(rows[m]) for m in MODES}, summarize_cost(run_rows), meta)
     Path(f"{base}.md").write_text(report, encoding="utf-8")
 
-    survey_md, key_rows = build_survey(survey_items, seed=args.seed)
+    survey_md, key_rows = build_survey(survey_items, seed=args.seed, show_scores=getattr(args, "show_scores", False))
     Path(f"{base}_survey.md").write_text(survey_md, encoding="utf-8")
     with open(f"{base}_survey_key.csv", "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=["question", "query", "A", "B", "same_title", "A_title", "B_title"])
@@ -434,6 +453,8 @@ def main_cli() -> None:
     parser.add_argument("--out-dir", default="", help="결과 저장 폴더 (기본 scripts/results)")
     parser.add_argument("--survey-run", type=int, default=1, help="설문 자료로 쓸 회차 (기본 1)")
     parser.add_argument("--seed", type=int, default=0, help="설문 A/B 배치 무작위 seed")
+    parser.add_argument("--show-scores", action="store_true",
+                        help="설문 자료에 관점별 점수도 표시 (기본: 근거만 표시)")
     args = parser.parse_args()
     if not 1 <= args.survey_run <= args.runs:
         parser.error("--survey-run은 1 이상 --runs 이하여야 합니다.")
