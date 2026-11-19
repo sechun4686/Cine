@@ -98,7 +98,7 @@ function Main() {
           <AgentCard
             icon={<TechnicalIcon size={26} />}
             title="Technical Agent"
-            subtitle="영상미 · 연출 · 촬영 기법"
+            subtitle="감독 이력 · 제작 규모 · 출연진"
             score="9.2"
             className="card-cinephile"
           />
@@ -147,7 +147,7 @@ function Main() {
 
       {/* 하단 */}
       <div className="bottom-text">
-        취향을 말씀해주시면 약 10초 후 추천이 완성됩니다
+        취향을 말씀해주시면 세 에이전트가 함께 분석해 추천을 완성합니다
       </div>
 
     </div>
