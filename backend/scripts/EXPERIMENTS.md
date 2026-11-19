@@ -45,3 +45,28 @@ python scripts/weight_sensitivity.py scripts/results/reproducibility_t02-free_*_
 
 서비스와 같은 조건(t02-free) 결과를 기본으로 쓰고, 여러 CSV를 한 번에 넣으면 합쳐서 분석한다.
 사용자 테스트 후에는 Supabase 로그(`db/analysis.sql` 5번)로도 같은 분석을 할 수 있다.
+
+## 실험 4. Single vs Multi agent 비교
+
+```bash
+python scripts/compare_single_multi.py --runs 1 --queries 1 --label check   # 동작 확인 (LLM 약 36회)
+python scripts/compare_single_multi.py --runs 3 --label main                # 본 실험 (LLM 약 530회)
+```
+
+쿼리마다 후보 5편과 가중치를 한 번만 정해 고정하고, 회차마다 multi → single 순서로 평가한다.
+single(`services/single_agent_service.py`)은 같은 회차 multi의 세 에이전트가 고른 도구 데이터를 그대로 받아
+LLM 한 번 호출로 세 관점을 평가한다. 평가 기준 문구·점수 기준·가중치 계산도 같으므로 **다른 점은 역할 분리 하나**다.
+
+보고서에 쓸 지표 (`compare_*.md`)
+1. 두 방식의 1위 일치율, 순위 상관(Kendall τ)
+2. 같은 후보에 대한 관점별 점수 차이(single − multi), 후보 간 점수 분산(작품을 얼마나 구분하는지)
+3. 방식별 일관성: 회차 간 점수 표준편차, 1위 일치율, 실패율 (`--runs 2` 이상)
+4. 비용: LLM 호출 수(후보 5편 기준 multi 30회 / single 5회), LLM 응답 시간 합
+
+설문 자료
+- `compare_*_survey.md`: 쿼리마다 두 방식의 1위 결과를 A/B로 무작위 배치 (방식 이름 없음). 구글 폼에 그대로 옮긴다
+- `compare_*_survey_key.csv`: A/B 정답표. 참가자에게 보여주지 않는다
+- 두 방식 1위가 같은 작품인 문항(`same_title`)은 근거 설명만 비교하게 된다
+
+`compare_*_single_raw.csv`, `compare_*_multi_raw.csv`는 실험 1 원자료와 같은 형식이라
+`weight_sensitivity.py`에 넣어 두 방식의 가중치 민감도도 비교할 수 있다.
