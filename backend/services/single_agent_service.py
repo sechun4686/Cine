@@ -8,14 +8,24 @@ multi-agent(agent_service.py)와 같은 것
     - 최종 점수 계산(calculate_final_score)과 가중치, 실패 처리 방식
     - 출력 형식 (technical / narrative / public / tool_usage / final_score / failed_agents)
 
-multi-agent와 다른 것 (비교하려는 변인)
+multi-agent와 다른 것 (비교하려는 변인은 이것 하나)
     - 에이전트 3개 대신 LLM 한 번 호출로 세 관점을 함께 평가한다
-    - 도구 선택 단계가 없다. 등록된 도구를 전부 실행해 모든 데이터를 한 번에 넘긴다
+
+평가 데이터
+    비교 실험에서는 multi-agent의 세 에이전트가 고른 도구 데이터를 그대로 넘긴다 (tool_data_list).
+    두 방식이 똑같은 데이터를 보므로, 결과 차이는 역할 분리에서만 생긴다.
+    tool_data_list 없이 단독으로 실행하면 등록된 도구를 전부 실행한다 (비교 실험에는 쓰지 않는다).
 
 LLM 호출 수: 후보당 1회 (multi-agent는 후보당 6회: 에이전트 3개 x 도구 선택·평가)
 
-사용 예
-    ranked = await evaluate_candidates_single(client, candidates, query, weights)
+사용 예 (비교 실험)
+    multi_cands = copy.deepcopy(candidates)
+    multi = await evaluate_candidates(client, multi_cands, query, weights)
+    # evaluate_candidates는 입력 dict에 결과를 붙이므로 multi_cands가 원래 순서 그대로 데이터를 갖고 있다
+    # (평가에 모두 실패해 순위에서 빠진 후보도 데이터는 남아 있다)
+    data = [tool_data_from_multi(c) for c in multi_cands]
+    single = await evaluate_candidates_single(client, copy.deepcopy(candidates), query, weights,
+                                              tool_data_list=data)
 """
 
 import asyncio
@@ -57,6 +67,13 @@ def parse_single_response(raw: str | None) -> dict:
         else:
             results[agent_type] = dict(FAIL_RESULT)
     return results
+
+
+def tool_data_from_multi(evaluated: dict) -> dict:
+    """multi-agent 평가 결과 후보 1개에서 에이전트별로 실제 사용한 데이터를 꺼낸다.
+    return: {관점: {도구명: 값}}"""
+    usage = evaluated.get("tool_usage") or {}
+    return {a: dict((usage.get(a) or {}).get("data") or {}) for a in AGENT_TYPES}
 
 
 async def collect_all_tool_data(ctx: ToolContext) -> tuple[dict, dict]:
@@ -110,27 +127,44 @@ async def evaluate_candidates_single(
     query: str,
     weights: dict | None = None,
     on_progress: ProgressCallback | None = None,
+    tool_data_list: list[dict] | None = None,
 ) -> list[dict]:
-    """agent_service.evaluate_candidates와 같은 입력·출력 형식의 single-agent 버전"""
+    """
+    agent_service.evaluate_candidates와 같은 입력·출력 형식의 single-agent 버전
+
+    tool_data_list: candidates와 같은 순서의 {관점: {도구명: 값}} 목록 (tool_data_from_multi 결과).
+                    주어지면 TMDB 조회와 도구 실행 없이 이 데이터로 평가한다.
+    """
     if not candidates:
         return []
+    if tool_data_list is not None and len(tool_data_list) != len(candidates):
+        raise ValueError("tool_data_list는 candidates와 길이가 같아야 합니다.")
 
-    all_details = await attach_details(client, candidates)
+    if tool_data_list is None:
+        all_details = await attach_details(client, candidates)
+    else:
+        all_details = [{} for _ in candidates]
     _emit(on_progress, {"type": "stage", "stage": "details", "status": "done"})
 
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM_CALLS)
     person_cache: dict = {}
-    all_tools = {a: [TOOL_REGISTRY[a][t]["label"] for t in TOOL_REGISTRY[a]] for a in AGENT_TYPES}
 
     async def evaluate_one(index: int, candidate: dict, details: dict) -> dict:
         base_event = {"type": "agent", "index": index, "title": candidate.get("title")}
+        given = tool_data_list[index] if tool_data_list is not None else None
 
         # 진행 이벤트는 multi와 같은 형식으로 보낸다 (로딩 화면 호환)
         for a in AGENT_TYPES:
-            _emit(on_progress, {**base_event, "agent": a, "phase": "tools_selected", "tools": all_tools[a]})
+            names = list(given[a]) if given is not None else list(TOOL_REGISTRY[a])
+            labels = [TOOL_REGISTRY[a][t]["label"] for t in names if t in TOOL_REGISTRY[a]]
+            _emit(on_progress, {**base_event, "agent": a, "phase": "tools_selected", "tools": labels})
 
-        ctx = ToolContext(client, candidate, details, person_cache)
-        tool_data, tool_failed = await collect_all_tool_data(ctx)
+        if given is not None:
+            tool_data = {a: dict(given.get(a) or {}) for a in AGENT_TYPES}
+            tool_failed = {a: [] for a in AGENT_TYPES}
+        else:
+            ctx = ToolContext(client, candidate, details, person_cache)
+            tool_data, tool_failed = await collect_all_tool_data(ctx)
         for a in AGENT_TYPES:
             _emit(on_progress, {**base_event, "agent": a, "phase": "data_ready"})
 
@@ -139,7 +173,8 @@ async def evaluate_candidates_single(
             _emit(on_progress, {**base_event, "agent": a, "phase": "scored",
                                 "score": results[a]["score"], "failed": results[a]["failed"]})
 
-        return {"results": results, "tool_data": tool_data, "tool_failed": tool_failed}
+        return {"results": results, "tool_data": tool_data, "tool_failed": tool_failed,
+                "source": "from_multi" if given is not None else "all"}
 
     outputs = await asyncio.gather(*(
         evaluate_one(i, c, d) for i, (c, d) in enumerate(zip(candidates, all_details))
@@ -152,9 +187,11 @@ async def evaluate_candidates_single(
             c[a] = results[a]
         c["tool_usage"] = {
             a: {
-                "tools": list(TOOL_REGISTRY[a]),
-                "reason": "single-agent: 도구 선택 없이 전체 도구 사용",
-                "status": "all",
+                "tools": list(out["tool_data"][a]),
+                "reason": ("single-agent: multi-agent가 고른 데이터를 그대로 사용"
+                           if out["source"] == "from_multi"
+                           else "single-agent: 도구 선택 없이 전체 도구 사용"),
+                "status": out["source"],
                 "rejected": [],
                 "failed": out["tool_failed"][a],
                 "data": out["tool_data"][a],
