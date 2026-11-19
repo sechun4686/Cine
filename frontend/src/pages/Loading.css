@@ -133,7 +133,7 @@
   justify-content: center;
 
   margin-right: 13px;
-  font-size: 20px;
+  color: var(--accent);
 }
 
 .loading-info {
