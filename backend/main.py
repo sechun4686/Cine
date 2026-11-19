@@ -1,4 +1,5 @@
-from typing import Literal
+import json
+from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 import asyncio
@@ -9,6 +10,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from services.agent_service import evaluate_candidates
 from services.candidate_service import select_candidates
@@ -291,6 +293,76 @@ def _log_ranking(ranked: list[dict]) -> None:
 @app.post("/api/recommend")
 async def recommend(request: RecommendRequest):
     """추천 파이프라인 실행 + 결과 로그 저장 (성공/실패 모두 기록)"""
+    return await _recommend_logged(request)
+
+
+SSE_PING_SEC = 15   # 이 시간 동안 이벤트가 없으면 연결 유지용 주석을 보낸다
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/recommend/stream")
+async def recommend_stream(request: RecommendRequest):
+    """
+    /api/recommend와 같은 파이프라인을 실행하면서 진행 상황을 SSE로 보낸다 (로딩 화면 연동용).
+
+    이벤트 (data: JSON)
+        {"type": "stage", "stage": "pool|weights|similarity|candidates|details|editor", "status": "running|done", ...}
+        {"type": "agent", "agent": "technical|narrative|public", "index": 0~4, "title",
+         "phase": "tools_selected|data_ready|scored", ...}
+        {"type": "result", "data": /api/recommend 응답과 같은 형식}
+        {"type": "error", "status": HTTP 상태 코드, "detail": 메시지}
+
+    오류도 이벤트로 보내므로 HTTP 상태는 항상 200이다.
+    (500 응답은 CORS 헤더가 빠져 브라우저에서 'Failed to fetch'로만 보이는 문제도 피한다)
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def worker() -> None:
+        try:
+            data = await _recommend_logged(request, emit=queue.put_nowait)
+            queue.put_nowait({"type": "result", "data": data})
+        except HTTPException as exc:
+            queue.put_nowait({"type": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception as exc:
+            print(f"[recommend/stream] 처리 실패: {exc!r}")
+            queue.put_nowait({"type": "error", "status": 500,
+                              "detail": "추천 처리 중 서버 오류가 발생했습니다."})
+        finally:
+            queue.put_nowait(None)
+
+    async def events():
+        # 클라이언트가 연결을 끊어도 작업은 끝까지 진행해 로그를 남긴다 (/api/recommend와 동일)
+        task = asyncio.create_task(worker())
+        app.state.stream_tasks = getattr(app.state, "stream_tasks", set())
+        app.state.stream_tasks.add(task)
+        task.add_done_callback(app.state.stream_tasks.discard)
+
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=SSE_PING_SEC)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if event is None:
+                break
+            yield _sse(event)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _noop(_: dict) -> None:
+    pass
+
+
+async def _recommend_logged(request: RecommendRequest, emit: Callable[[dict], None] = _noop) -> dict:
+    """추천 파이프라인 실행 + 결과 로그 저장 (성공/실패 모두 기록)"""
     request_id = str(uuid.uuid4())
     started = time.perf_counter()
     info: dict = {}
@@ -313,7 +385,7 @@ async def recommend(request: RecommendRequest):
         )])
 
     try:
-        response = await _run_recommend(request, info)
+        response = await _run_recommend(request, info, emit)
     except HTTPException as exc:
         await log_request("error", error=f"{exc.status_code}: {exc.detail}")
         raise
@@ -332,9 +404,10 @@ async def recommend(request: RecommendRequest):
     return {"request_id": request_id, **response}
 
 
-async def _run_recommend(request: RecommendRequest, info: dict) -> dict:
+async def _run_recommend(request: RecommendRequest, info: dict, emit: Callable[[dict], None] = _noop) -> dict:
     """
     추천 파이프라인 본체. info에 로그용 중간 결과(pool_size, weight_result, ranked)를 채운다.
+    emit: 진행 이벤트 콜백 (스트리밍 엔드포인트에서만 사용)
     """
     if not os.getenv("TMDB_API_KEY"):
         raise HTTPException(status_code=500, detail="TMDB_API_KEY 환경변수가 설정되지 않았습니다.")
@@ -345,6 +418,7 @@ async def _run_recommend(request: RecommendRequest, info: dict) -> dict:
 
     async with httpx.AsyncClient(timeout=60) as client:
         # 1) 후보군 수집 + 가중치 추론을 동시에 실행
+        emit({"type": "stage", "stage": "pool", "status": "running"})
         try:
             pool, weight_result = await asyncio.gather(
                 _fetch_pool(client, request),
@@ -380,16 +454,21 @@ async def _run_recommend(request: RecommendRequest, info: dict) -> dict:
         weights = weight_result["weights"]
         info["pool_size"] = len(pool)
         info["weight_result"] = weight_result
+        emit({"type": "stage", "stage": "pool", "status": "done", "count": len(pool)})
+        emit({"type": "stage", "stage": "weights", "status": "done", "weights": weights})
 
         # 2) 유사도 계산 (임베딩 연산이 무거워 별도 스레드에서 실행)
         pool = await asyncio.to_thread(rank_candidates_by_similarity, query, pool)
+        emit({"type": "stage", "stage": "similarity", "status": "done"})
 
         # 3) 후보 5개 선별
         candidates = select_candidates(pool, query)
         _log_candidates(query, len(pool), weight_result, candidates)
+        emit({"type": "stage", "stage": "candidates", "status": "done", "count": len(candidates),
+              "titles": [c.get("title") for c in candidates]})
 
         # 4) 에이전트 평가 + 가중치 적용 최종 점수
-        ranked = await evaluate_candidates(client, candidates, query, weights)
+        ranked = await evaluate_candidates(client, candidates, query, weights, on_progress=emit)
 
         if not ranked:
             raise HTTPException(status_code=502, detail="에이전트 평가 결과가 없습니다.")
@@ -399,7 +478,9 @@ async def _run_recommend(request: RecommendRequest, info: dict) -> dict:
 
         # 5) Lead Editor 총평 (1위 작품만)
         best = ranked[0]
+        emit({"type": "stage", "stage": "editor", "status": "running", "title": best.get("title")})
         editor_comment = await _write_editor_comment(client, query, best)
+        emit({"type": "stage", "stage": "editor", "status": "done"})
 
     return {
         "best": _format_candidate(best, weights, editor_comment),

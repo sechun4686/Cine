@@ -105,7 +105,7 @@ def _patch_pipeline(monkeypatch, pool):
         return {"weights": {"technical": 0.3, "narrative": 0.4, "public": 0.3},
                 "importance": {"technical": 3, "narrative": 4, "public": 3}, "reason": "이유", "status": "ok"}
 
-    async def fake_eval(client, candidates, query, weights):
+    async def fake_eval(client, candidates, query, weights, **kwargs):
         return [{**c, "final_score": 8.0 - i, "failed_agents": [],
                  **{a: {"score": 8.0 - i, "reason": "-"} for a in ("technical", "narrative", "public")}}
                 for i, c in enumerate(candidates)]
@@ -203,6 +203,23 @@ async def test_url_copied_with_rest_v1_suffix_still_works(monkeypatch, log_dir):
     async with client:
         assert await log_service.save("feedback", [{"a": 1}], client) == "supabase"
     assert str(seen[0].url) == "https://abc.supabase.co/rest/v1/feedback"
+
+
+def test_recommend_stream_logs_same_as_recommend(monkeypatch, captured):
+    import json as _json
+    _patch_pipeline(monkeypatch, [{"id": i, "media_type": "movie", "title": f"m{i}", "overview": "x"}
+                                  for i in range(3)])
+    text = TestClient(main.app).post("/api/recommend/stream", json={"query": "힐링", "participant_id": "P02"}).text
+    events = [_json.loads(l[6:]) for l in text.splitlines() if l.startswith("data: ")]
+    stages = [(e["stage"], e["status"]) for e in events if e["type"] == "stage"]
+    assert stages == [("pool", "running"), ("pool", "done"), ("weights", "done"), ("similarity", "done"),
+                      ("candidates", "done"), ("editor", "running"), ("editor", "done")]
+    result = events[-1]
+    assert result["type"] == "result" and result["data"]["best"]["reason"] == "총평"
+
+    rec = [r for t, r in captured() if t == "recommendations"]
+    assert len(rec) == 1 and rec[0]["request_id"] == result["data"]["request_id"]
+    assert rec[0]["participant_id"] == "P02" and rec[0]["status"] == "ok"
 
 
 # ------------------------------------------------------------------

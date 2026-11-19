@@ -547,14 +547,15 @@ body {
 
 /* 카드별 아이콘 */
 
+/* 로딩 화면과 같은 색: Narrative 청록 / Public 주황 */
 .card-popular .agent-icon {
-  background: #fff0e8;
-  color: #f39b68;
+  background: #e3f7f3;
+  color: #4dbeb2;
 }
 
 .card-preference .agent-icon {
-  background: #e3f7f3;
-  color: #4dbeb2;
+  background: #fff0e8;
+  color: #f39b68;
 }
 
 

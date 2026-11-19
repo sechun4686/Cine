@@ -97,7 +97,7 @@ def test_recommend_excludes_ids(monkeypatch):
         return {"weights": {"technical": 0.3, "narrative": 0.4, "public": 0.3}, "importance": None,
                 "reason": "-", "status": "fallback"}
 
-    async def fake_eval(client, candidates, query, weights):
+    async def fake_eval(client, candidates, query, weights, **kwargs):
         seen["ids"] = [c["id"] for c in candidates]
         return [{**c, "final_score": 7.0, **{a: {"score": 7.0, "reason": "-"} for a in
                 ("technical", "narrative", "public")}} for c in candidates]

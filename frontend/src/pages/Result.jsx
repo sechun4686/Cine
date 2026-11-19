@@ -294,7 +294,7 @@ function Result({
 
           <div className="feedback-actions">
             {accepted ? (
-              <p className="feedback-thanks">좋은 선택이에요! 즐거운 감상 되세요 🎬</p>
+              <p className="feedback-thanks">좋은 선택이에요! 즐거운 감상 되세요</p>
             ) : (
               <button
                 type="button"

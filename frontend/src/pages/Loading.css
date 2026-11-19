@@ -133,7 +133,7 @@
   justify-content: center;
 
   margin-right: 13px;
-  font-size: 20px;
+  color: var(--accent);
 }
 
 .loading-info {
@@ -258,6 +258,12 @@
   transition: width 0.6s ease;
 }
 
+/* 진행률을 알 수 없을 때 (구버전 백엔드): 왕복하는 막대 */
+.loading-bar.is-indeterminate .loading-bar-fill {
+  width: 35%;
+  animation: loading-indeterminate 1.4s ease-in-out infinite;
+}
+
 /* ---------- 하단 문구 ---------- */
 
 .loading-footer {
@@ -298,12 +304,22 @@
   }
 }
 
+@keyframes loading-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(290%);
+  }
+}
+
 /* 움직임을 줄이도록 설정한 사용자 */
 @media (prefers-reduced-motion: reduce) {
   .loading-spinner,
   .loading-step-spinner,
   .loading-check,
-  .loading-step {
+  .loading-step,
+  .loading-bar.is-indeterminate .loading-bar-fill {
     animation: none;
   }
 }
