@@ -2,7 +2,7 @@
 --
 -- recommendations : 추천 요청 1회 = 1행 (입력 조건, 추론된 가중치, 최종 추천작, 응답 시간)
 -- candidates      : 요청마다 평가한 후보 1개 = 1행 (세 에이전트 점수, 최종 점수) -> 가중치 민감도 분석에 사용
--- feedback        : 결과 화면 버튼 클릭 1회 = 1행 (이거 볼래요 / 이미 봤어요 / 관심 없어요) -> 첫 추천 수락률
+-- feedback        : 결과 화면 버튼 클릭 1회 = 1행 (이거 볼래요 / 이미 봤어요 / 관심 없어요 / 추가 요청으로 다시 추천) -> 첫 추천 수락률
 --
 -- 테이블끼리는 request_id로 연결한다. 로그 저장 순서가 꼬여도 실패하지 않도록 외래키는 걸지 않았다.
 
@@ -13,6 +13,7 @@ create table if not exists recommendations (
     query           text,
     filters         jsonb,                    -- {"ott": [...], "genres": [...], "media": [...], "runtime": 120}
     exclude_ids     jsonb,                    -- 재추천 새 검색일 때 제외한 작품
+    parent_request_id uuid,                   -- 결과 화면에서 이어서 다시 검색했을 때 직전 추천 요청 (첫 검색이면 null)
     status          text not null,            -- ok | error
     error           text,
     elapsed_sec     real,                     -- 요청 처리 시간
@@ -50,13 +51,14 @@ create table if not exists feedback (
     created_at      timestamptz not null default now(),
     request_id      uuid,
     participant_id  text,
-    feedback        text not null check (feedback in ('accepted', 'watched', 'not_interested')),
+    feedback        text not null check (feedback in ('accepted', 'watched', 'not_interested', 'refine')),
     item_key        text,                     -- 피드백을 받은 작품
     title           text,
     shown_order     integer,                  -- 이 요청에서 몇 번째로 보여준 작품인지 (1 = 첫 추천)
     next_item_key   text,                     -- 재추천으로 새로 보여준 작품 (없으면 null)
     next_title      text,
-    need_new_search boolean
+    need_new_search boolean,
+    refine_text     text                      -- refine일 때 사용자가 덧붙인 추가 요청
 );
 
 create index if not exists candidates_request_idx on candidates (request_id);

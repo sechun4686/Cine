@@ -115,6 +115,7 @@ def recommendation_row(
     filters: dict,
     exclude_ids: list[str],
     elapsed_sec: float,
+    parent_request_id: str | None = None,
     status: str = "ok",
     error: str | None = None,
     pool_size: int | None = None,
@@ -122,7 +123,7 @@ def recommendation_row(
     best: dict | None = None,
 ) -> dict:
     weight_result = weight_result or {}
-    return {
+    row = {
         "request_id": request_id,
         "participant_id": participant_id or None,
         "query": query,
@@ -139,6 +140,11 @@ def recommendation_row(
         "best_key": _key(best) if best else None,
         "best_title": best.get("title") if best else None,
     }
+    # 새 컬럼은 값이 있을 때만 넣는다. DB 마이그레이션(db/migrations/001_refine.sql) 전에도
+    # 일반 추천 로그는 그대로 저장되도록 하기 위함
+    if parent_request_id:
+        row["parent_request_id"] = parent_request_id
+    return row
 
 
 def candidate_rows(request_id: str, ranked: list[dict]) -> list[dict]:
@@ -173,8 +179,9 @@ def feedback_row(
     shown_order: int | None = None,
     next_item: dict | None = None,
     need_new_search: bool | None = None,
+    text: str | None = None,
 ) -> dict:
-    return {
+    row = {
         "request_id": request_id or None,
         "participant_id": participant_id or None,
         "feedback": feedback,
@@ -185,6 +192,9 @@ def feedback_row(
         "next_title": next_item.get("title") if next_item else None,
         "need_new_search": need_new_search,
     }
+    if text:   # refine의 추가 요청 (값이 있을 때만: 위 recommendation_row와 같은 이유)
+        row["refine_text"] = text
+    return row
 
 
 def _key(item: dict) -> str:

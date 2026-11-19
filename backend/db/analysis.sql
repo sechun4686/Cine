@@ -45,3 +45,12 @@ order by r.created_at, c.rank;
 select agent, count(*) as failed
 from candidates, jsonb_array_elements_text(failed_agents) as agent
 group by agent;
+
+-- 추가 요청으로 다시 추천받기(refine): 덧붙인 문장, 그 뒤 검색에서 추천된 작품, 그 작품에 대한 반응
+select f.participant_id, f.shown_order, f.title as rejected_title, f.refine_text,
+       r.query as combined_query, r.best_title as next_title, nf.feedback as next_feedback
+from feedback f
+left join recommendations r on r.parent_request_id = f.request_id and r.participant_id is not distinct from f.participant_id
+left join feedback nf on nf.request_id = r.request_id and nf.shown_order = f.shown_order + 1
+where f.feedback = 'refine'
+order by f.created_at;

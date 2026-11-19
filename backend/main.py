@@ -55,6 +55,7 @@ class RecommendRequest(BaseModel):
     query: str = ""
     exclude_ids: list[str] = Field(default_factory=list)   # "movie:123" 형식. 재추천 시 이미 본/거절한 작품
     participant_id: str = ""                                # 사용자 테스트 참가자 번호 (로그용)
+    parent_request_id: str = ""                             # 로그용: 결과 화면에서 이어서 다시 검색했을 때 직전 추천 요청
 
 
 class RerecommendRequest(BaseModel):
@@ -68,8 +69,9 @@ class RerecommendRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    feedback: Literal["accepted", "watched", "not_interested"]
+    feedback: Literal["accepted", "watched", "not_interested", "refine"]
     item: dict                                              # 피드백을 받은 작품 (응답의 best 그대로)
+    text: str = ""                                          # refine: 사용자가 덧붙인 추가 요청
     request_id: str = ""
     participant_id: str = ""
     shown_order: int | None = None
@@ -373,6 +375,7 @@ async def _recommend_logged(request: RecommendRequest, emit: Callable[[dict], No
             filters={"ott": request.ott, "genres": request.genres, "media": request.media,
                      "runtime": request.runtime},
             exclude_ids=request.exclude_ids,
+            parent_request_id=request.parent_request_id,
             elapsed_sec=time.perf_counter() - started,
             status=status,
             error=error,
@@ -545,12 +548,16 @@ async def rerecommend(request: RerecommendRequest):
 
 @app.post("/api/feedback")
 async def feedback(request: FeedbackRequest):
-    """'이거 볼래요'처럼 재추천이 필요 없는 피드백을 기록한다."""
+    """
+    재추천을 서버에서 하지 않는 피드백을 기록한다.
+    accepted: '이거 볼래요' / refine: 추가 요청을 덧붙여 다시 추천받기 (프론트가 /api/recommend를 새로 호출)
+    """
     await log_service.save("feedback", [log_service.feedback_row(
         request_id=request.request_id,
         participant_id=request.participant_id,
         feedback=request.feedback,
         item=request.item,
         shown_order=request.shown_order,
+        text=request.text.strip() if request.feedback == "refine" else None,
     )])
     return {"ok": True}
