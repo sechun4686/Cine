@@ -6,6 +6,16 @@ measure_reproducibility.py
     python scripts/measure_reproducibility.py                 # 기본: 쿼리 5개 x 5회
     python scripts/measure_reproducibility.py --runs 3 --queries 3 --label after-fix
 
+비교 조건 (재평가 실험)
+    --eval-temperature 0.7     평가 temperature를 바꿔서 측정 (기본: 서비스 설정값 0.2)
+    --fixed-tools              LLM 도구 선택을 끄고 에이전트마다 같은 도구를 쓴다
+                               -> 점수 편차가 '도구 선택'에서 오는지 '같은 데이터 채점'에서 오는지 분리
+    예) 4가지 조건
+        --label t02-free
+        --label t02-fixed --fixed-tools
+        --label t07-free  --eval-temperature 0.7
+        --label t07-fixed --eval-temperature 0.7 --fixed-tools
+
 측정 방식
     - 쿼리마다 후보 5개는 처음 한 번만 뽑아 고정한다 (후보가 바뀐 영향과 에이전트 편차를 분리)
     - 매 회차마다 가중치 추론 + 세 에이전트 평가(도구 선택 포함)를 다시 실행한다
@@ -16,12 +26,16 @@ measure_reproducibility.py
     reproducibility_<label>_<시각>.md        요약표 (보고서용)
 
 LLM 호출 수: 쿼리 수 x 회차 x 31회 (가중치 1 + 후보 5 x 에이전트 3 x 2)
+            --fixed-tools면 16회 (도구 선택 호출 없음)
+
+원자료 CSV는 scripts/weight_sensitivity.py(가중치 민감도 분석)의 입력으로도 쓴다.
 """
 
 import argparse
 import asyncio
 import copy
 import csv
+import json
 import os
 import statistics
 import sys
@@ -33,6 +47,13 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 AGENT_TYPES = ("technical", "narrative", "public")
+
+# --fixed-tools에서 쓰는 도구 (에이전트마다 최대 4개, 핵심 데이터 우선)
+FIXED_TOOLS = {
+    "technical": ["director", "director_filmography", "production_companies", "cast"],
+    "narrative": ["overview_full", "keywords", "genres", "tagline"],
+    "public": ["vote_stats", "popularity", "release_year", "reviews"],
+}
 
 # 성격이 다른 쿼리 5개 (분위기 / 장르 / 대상 / 실화 / 작품성)
 DEFAULT_QUERIES = [
@@ -49,6 +70,33 @@ DEFAULT_QUERIES = [
 # ------------------------------------------------------------------
 def _std(values: list[float]) -> float:
     return statistics.pstdev(values) if len(values) > 1 else 0.0
+
+
+def kendall_tau(order_a: list, order_b: list) -> float | None:
+    """
+    두 순위(작품 key 목록, 1위부터)의 Kendall tau (-1~1). 둘 다에 있는 작품만 비교한다.
+    1 = 순위가 완전히 같음, 0 = 무관, -1 = 완전히 뒤집힘. 비교할 쌍이 없으면 None.
+    """
+    common = [x for x in order_a if x in set(order_b)]
+    pos_b = {x: i for i, x in enumerate(order_b)}
+    pairs = concordant = 0
+    for i in range(len(common)):
+        for j in range(i + 1, len(common)):
+            pairs += 1
+            if pos_b[common[i]] < pos_b[common[j]]:
+                concordant += 1
+    if pairs == 0:
+        return None
+    return (2 * concordant - pairs) / pairs
+
+
+def mean_pairwise_tau(orders: list[list]) -> float | None:
+    """여러 회차 순위끼리 모든 쌍의 Kendall tau 평균"""
+    taus = [
+        t for i in range(len(orders)) for j in range(i + 1, len(orders))
+        if (t := kendall_tau(orders[i], orders[j])) is not None
+    ]
+    return statistics.mean(taus) if taus else None
 
 
 def summarize(rows: list[dict]) -> dict:
@@ -85,8 +133,14 @@ def summarize(rows: list[dict]) -> dict:
         top1 = [next((r["title"] for r in q_rows if r["run"] == run and r["rank"] == 1), None) for run in runs]
         most = max(set(top1), key=top1.count) if top1 else None
         q_cells = [c for c in cells if c["query"] == q]
+        orders = [
+            [r["item_key"] for r in sorted(
+                {r["item_key"]: r for r in q_rows if r["run"] == run}.values(), key=lambda r: r["rank"])]
+            for run in runs
+        ]
         per_query[q] = {
             "runs": len(runs),
+            "rank_tau": mean_pairwise_tau(orders),
             "top1_agreement": top1.count(most) / len(top1) if top1 else 0.0,
             "top1_titles": top1,
             "mean_std": statistics.mean(c["std"] for c in q_cells) if q_cells else 0.0,
@@ -122,7 +176,8 @@ def to_markdown(summary: dict, meta: dict) -> str:
         "",
         f"- 측정 시각: {meta['started']}",
         f"- 쿼리 {meta['queries']}개 x {meta['runs']}회, 쿼리마다 후보 5개 고정",
-        f"- 평가 temperature: {meta['eval_temperature']}, 소요 시간: {meta['elapsed_min']:.1f}분",
+        f"- 평가 temperature: {meta['eval_temperature']}, 도구 선택: {meta.get('tools_mode', 'LLM 선택')}"
+        f", 소요 시간: {meta['elapsed_min']:.1f}분",
         "",
         "## 에이전트별 점수 편차 (0~10점 기준)",
         "",
@@ -136,12 +191,15 @@ def to_markdown(summary: dict, meta: dict) -> str:
         "",
         "## 쿼리별 최종 추천(1위) 일치율",
         "",
-        "| 쿼리 | 1위 일치율 | 평균 표준편차 | 최대 범위 | 회차별 1위 |",
-        "|---|---|---|---|---|",
+        "순위 상관은 회차끼리 5편 순위의 Kendall tau 평균 (1 = 매번 같은 순위, 0 = 무관)",
+        "",
+        "| 쿼리 | 1위 일치율 | 순위 상관(τ) | 평균 표준편차 | 최대 범위 | 회차별 1위 |",
+        "|---|---|---|---|---|---|",
     ]
     for q, s in summary["per_query"].items():
         titles = " → ".join(t or "-" for t in s["top1_titles"])
-        lines.append(f"| {q} | {s['top1_agreement'] * 100:.0f}% | {s['mean_std']:.2f} | {s['max_range']:.1f} | {titles} |")
+        lines.append(f"| {q} | {s['top1_agreement'] * 100:.0f}% | {fmt(s.get('rank_tau'))} | {s['mean_std']:.2f}"
+                     f" | {s['max_range']:.1f} | {titles} |")
 
     te = summary["tool_effect"]
     lines += [
@@ -168,10 +226,21 @@ async def run(args) -> None:
 
     import httpx
     import main
-    from services.agent_service import EVAL_TEMPERATURE, evaluate_candidates
+    from services import agent_service
+    from services.agent_service import evaluate_candidates
     from services.candidate_service import select_candidates
     from services.embedding_service import rank_candidates_by_similarity
     from services.weight_service import infer_weights
+
+    # 비교 조건 적용 (이 프로세스 안에서만 바뀐다. 서비스 코드는 그대로)
+    if getattr(args, "eval_temperature", None) is not None:
+        agent_service.EVAL_TEMPERATURE = args.eval_temperature
+    if getattr(args, "fixed_tools", False):
+        async def fixed_select(client, candidate, query, agent_type, semaphore):
+            return {"tools": list(FIXED_TOOLS[agent_type]), "reason": "고정 도구 (실험 조건)",
+                    "status": "fixed", "rejected": []}
+        agent_service.select_tools = fixed_select
+    eval_temperature = agent_service.EVAL_TEMPERATURE
 
     for key in ("TMDB_API_KEY", "LUXIA_API_KEY"):
         if not os.getenv(key):
@@ -228,12 +297,16 @@ async def run(args) -> None:
                                 "weights": weight_result.get("weights"),
                             }
                             rows.append(row)
-                            writer.writerow({**row, "tools": "|".join(row["tools"])})
+                            # dict는 JSON으로 저장 (weight_sensitivity.py가 다시 읽는다)
+                            writer.writerow({**row, "tools": "|".join(row["tools"]),
+                                             "importance": json.dumps(row["importance"]),
+                                             "weights": json.dumps(row["weights"])})
                     f.flush()   # 중간에 멈춰도 그때까지의 원자료는 남는다
 
     meta = {
         "label": args.label, "started": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "queries": len(queries), "runs": args.runs, "eval_temperature": EVAL_TEMPERATURE,
+        "queries": len(queries), "runs": args.runs, "eval_temperature": eval_temperature,
+        "tools_mode": "고정" if getattr(args, "fixed_tools", False) else "LLM 선택",
         "elapsed_min": (time.perf_counter() - started) / 60,
     }
     report = to_markdown(summarize(rows), meta)
@@ -248,9 +321,13 @@ def main_cli() -> None:
     parser.add_argument("--queries", type=int, default=len(DEFAULT_QUERIES), help="사용할 쿼리 수 (최대 5)")
     parser.add_argument("--label", default="baseline", help="결과 파일 이름에 붙일 이름 (예: baseline, after-fix)")
     parser.add_argument("--out-dir", default="", help="결과 저장 폴더 (기본 scripts/results)")
+    parser.add_argument("--eval-temperature", type=float, default=None,
+                        help="에이전트 평가 temperature (기본: 서비스 설정값)")
+    parser.add_argument("--fixed-tools", action="store_true",
+                        help="LLM 도구 선택 대신 에이전트마다 고정 도구 사용")
     args = parser.parse_args()
 
-    calls = args.queries * args.runs * 31
+    calls = args.queries * args.runs * (16 if args.fixed_tools else 31)
     print(f"쿼리 {args.queries}개 x {args.runs}회 = 추천 평가 {args.queries * args.runs}번, LLM 호출 약 {calls}회")
     asyncio.run(run(args))
 
