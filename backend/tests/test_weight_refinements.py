@@ -51,7 +51,7 @@ def test_recommend_passes_refinements_to_weights_and_combined_query_elsewhere(mo
     monkeypatch.setenv("LUXIA_API_KEY", "l")
     seen = {}
 
-    async def fake_pool(client, request):
+    async def fake_pool(client, request, info=None):
         return [{"id": i, "media_type": "movie", "title": f"m{i}", "overview": "x"} for i in range(3)]
 
     async def fake_weights(client, query, refinements=None):
