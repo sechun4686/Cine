@@ -20,7 +20,7 @@ from services.llm_service import call_luxia
 from services.rerecommend_service import candidate_key, pick_alternative
 from services import log_service
 from services.tmdb_service import fetch_filtered_pool
-from services.weight_service import infer_weights
+from services.weight_service import combine_query, infer_weights
 
 load_dotenv(
     os.path.join(os.path.dirname(__file__), ".env"),
@@ -55,6 +55,7 @@ class RecommendRequest(BaseModel):
     query: str = ""
     exclude_ids: list[str] = Field(default_factory=list)   # "movie:123" 형식. 재추천 시 이미 본/거절한 작품
     participant_id: str = ""                                # 사용자 테스트 참가자 번호 (로그용)
+    refinements: list[str] = Field(default_factory=list)   # 결과 화면에서 덧붙인 추가 요청 (오래된 순)
     parent_request_id: str = ""                             # 로그용: 결과 화면에서 이어서 다시 검색했을 때 직전 추천 요청
 
 
@@ -371,7 +372,7 @@ async def _recommend_logged(request: RecommendRequest, emit: Callable[[dict], No
         await log_service.save("recommendations", [log_service.recommendation_row(
             request_id=request_id,
             participant_id=request.participant_id,
-            query=(request.query or "").strip(),
+            query=combine_query(request.query, request.refinements),
             filters={"ott": request.ott, "genres": request.genres, "media": request.media,
                      "runtime": request.runtime},
             exclude_ids=request.exclude_ids,
@@ -414,7 +415,8 @@ async def _run_recommend(request: RecommendRequest, info: dict, emit: Callable[[
     if not os.getenv("LUXIA_API_KEY"):
         raise HTTPException(status_code=500, detail="LUXIA_API_KEY 환경변수가 설정되지 않았습니다.")
 
-    query = (request.query or "").strip()
+    # 유사도·에이전트·총평에는 합친 문장을, 가중치 추론에는 추가 요청을 구분해서 넘긴다
+    query = combine_query(request.query, request.refinements)
 
     async with httpx.AsyncClient(timeout=60) as client:
         # 1) 후보군 수집 + 가중치 추론을 동시에 실행
@@ -422,7 +424,7 @@ async def _run_recommend(request: RecommendRequest, info: dict, emit: Callable[[
         try:
             pool, weight_result = await asyncio.gather(
                 _fetch_pool(client, request),
-                infer_weights(client, query),
+                infer_weights(client, request.query, request.refinements),
             )
         except httpx.HTTPStatusError as exc:
             raise HTTPException(

@@ -12,7 +12,7 @@ LLM에게는 가중치 자체가 아니라 중요도 점수만 맡기고,
 가중치 계산은 Python Softmax가 하기 때문에 같은 점수면 항상 같은 가중치가 나온다.
 
 사용 예 (main.py)
-    weight_result = await infer_weights(client, request.query)
+    weight_result = await infer_weights(client, request.query, request.refinements)
     ranked = await evaluate_candidates(client, candidates, request.query, weight_result["weights"])
 
 반환 형식
@@ -86,7 +86,20 @@ def get_default_weights() -> dict:
 # ------------------------------------------------------------------
 # 1) LLM 중요도 추론 프롬프트 (restrict)
 # ------------------------------------------------------------------
-def build_importance_prompt(query: str) -> str:
+def build_importance_prompt(query: str, refinements: list[str] | None = None) -> str:
+    refinements = [r.strip() for r in (refinements or []) if r and r.strip()]
+    refine_block = ""
+    refine_rule = ""
+    if refinements:
+        lines = "\n".join(f"{i}. {r}" for i, r in enumerate(refinements, 1))
+        refine_block = f"""
+[결과를 본 사용자가 덧붙인 추가 요청 (번호가 클수록 최근)]
+{lines}
+"""
+        refine_rule = """5. 추가 요청은 앞선 추천이 마음에 들지 않아 방향을 바꾸려는 것이야. 원래 검색어보다 추가 요청을 우선하고, 최근 요청일수록 더 중요하게 봐.
+6. 추가 요청이 직접 요구하는 관점(예: '유명한', '인기 있는' -> public / '연출이 좋은', '영상미' -> technical / '이야기가 탄탄한' -> narrative)은 4~5점을 줘.
+7. reason에는 추가 요청을 어떻게 반영했는지도 써.
+"""
     return f"""너는 사용자의 콘텐츠 검색어를 보고, 세 가지 평가 관점이 각각 얼마나 중요한지 판단하는 역할이야.
 
 [평가 관점]
@@ -105,10 +118,10 @@ def build_importance_prompt(query: str) -> str:
 2. 키는 technical, narrative, public, reason 네 개만 사용해.
 3. reason에는 점수를 그렇게 준 이유를 1~2문장으로 써.
 4. 아래 JSON 형식 외에 다른 말은 절대 하지 마.
-
+{refine_rule}
 [사용자 검색어]
 {query}
-
+{refine_block}
 출력 형식:
 {{"technical": 3, "narrative": 4, "public": 2, "reason": "판단 이유"}}
 """
@@ -161,10 +174,20 @@ def _rounded(weights: dict) -> dict:
     return {k: round(v, 3) for k, v in weights.items()}
 
 
-async def infer_weights(client: httpx.AsyncClient, query: str) -> dict:
-    """쿼리로 T/N/P 가중치를 계산한다. 실패하면 동일 가중치를 반환한다."""
+def combine_query(query: str, refinements: list[str] | None = None) -> str:
+    """원래 검색어와 추가 요청을 하나의 문장으로 합친다 (유사도 계산, 에이전트 평가, 총평, 로그용)"""
+    parts = [(query or "").strip(), *[(r or "").strip() for r in (refinements or [])]]
+    return ", ".join(p for p in parts if p)
 
-    if not (query or "").strip():
+
+async def infer_weights(client: httpx.AsyncClient, query: str, refinements: list[str] | None = None) -> dict:
+    """
+    쿼리로 T/N/P 가중치를 계산한다. 실패하면 동일 가중치를 반환한다.
+    refinements: 결과 화면에서 덧붙인 추가 요청. 원래 검색어와 구분해서 프롬프트에 넣어 우선 반영한다.
+    """
+    refinements = [r.strip() for r in (refinements or []) if r and r.strip()]
+
+    if not (query or "").strip() and not refinements:
         return {
             "weights": _rounded(get_default_weights()),
             "importance": None,
@@ -176,7 +199,7 @@ async def infer_weights(client: httpx.AsyncClient, query: str) -> dict:
         raw = await call_luxia(
             client,
             "너는 검색 의도를 분석하는 AI야.",
-            build_importance_prompt(query),
+            build_importance_prompt(query, refinements),
             temperature=LLM_TEMPERATURE,
             max_tokens=200,
         )

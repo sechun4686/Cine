@@ -93,7 +93,7 @@ def test_recommend_excludes_ids(monkeypatch):
     async def fake_pool(client, request):
         return [{"id": 1, "media_type": "movie", "title": "a"}, {"id": 2, "media_type": "movie", "title": "b"}]
 
-    async def fake_weights(client, query):
+    async def fake_weights(client, query, refinements=None):
         return {"weights": {"technical": 0.3, "narrative": 0.4, "public": 0.3}, "importance": None,
                 "reason": "-", "status": "fallback"}
 

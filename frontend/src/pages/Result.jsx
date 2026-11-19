@@ -19,6 +19,14 @@ const FEEDBACK_OPTIONS = [
   { value: 'not_interested', label: '관심 없어요' },
 ]
 
+// 원래 요청 + 덧붙인 요청 (백엔드 weight_service.combine_query와 같은 방식)
+function fullQuery(filters) {
+  return [filters?.query, ...(filters?.refinements ?? [])]
+    .map((part) => (part ?? '').trim())
+    .filter(Boolean)
+    .join(', ')
+}
+
 function candidateKey(item) {
   return `${item?.media_type || 'movie'}:${item?.id}`
 }
@@ -130,7 +138,7 @@ function Result({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: filters?.query ?? '',
+          query: fullQuery(filters),
           feedback,
           rejected: best,
           candidates: others,
@@ -193,10 +201,10 @@ function Result({
       }),
     }).catch((error) => console.error('피드백 기록 실패:', error))
 
-    const baseQuery = (filters?.query ?? '').trim()
+    // 원래 요청은 그대로 두고 추가 요청을 따로 쌓는다 -> 백엔드가 가중치 추론에서 추가 요청을 우선 반영
     setFilters?.({
       ...filters,
-      query: baseQuery ? `${baseQuery}, ${text}` : text,
+      refinements: [...(filters?.refinements ?? []), text],
       parent_request_id: result?.request_id ?? '',
     })
     setExcludeIds?.([...new Set([...excludeIds, candidateKey(best), ...others.map(candidateKey)])])
@@ -491,9 +499,9 @@ function Result({
 
         {refineOpen && (
           <form id="refine-panel" className="refine-panel" onSubmit={handleRefine}>
-            {filters?.query && (
+            {fullQuery(filters) && (
               <p className="refine-base">
-                <strong>지금까지의 요청</strong> {filters.query}
+                <strong>지금까지의 요청</strong> {fullQuery(filters)}
               </p>
             )}
             <label htmlFor="refine-input">덧붙일 조건</label>
