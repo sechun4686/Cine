@@ -101,7 +101,7 @@ def _patch_pipeline(monkeypatch, pool):
     async def fake_pool(client, request):
         return pool
 
-    async def fake_weights(client, query):
+    async def fake_weights(client, query, refinements=None):
         return {"weights": {"technical": 0.3, "narrative": 0.4, "public": 0.3},
                 "importance": {"technical": 3, "narrative": 4, "public": 3}, "reason": "이유", "status": "ok"}
 
@@ -233,7 +233,7 @@ def test_refine_feedback_and_followup_search_are_linked(monkeypatch, captured):
 
     tc.post("/api/feedback", json={"feedback": "refine", "item": best, "text": " 좀 더 최근 작품 ",
                                    "request_id": "r1", "participant_id": "P03", "shown_order": 1})
-    tc.post("/api/recommend", json={"query": "힐링, 좀 더 최근 작품", "exclude_ids": ["movie:1"],
+    tc.post("/api/recommend", json={"query": "힐링", "refinements": ["좀 더 최근 작품"], "exclude_ids": ["movie:1"],
                                     "parent_request_id": "r1", "participant_id": "P03"})
     rows = captured()
 

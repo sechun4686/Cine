@@ -23,6 +23,7 @@ function buildPayload(filters, excludeIds, participantId) {
         : [],
     runtime: Number(filters.runtime ?? 120),
     query: filters.query ?? "",
+    refinements: Array.isArray(filters.refinements) ? filters.refinements : [],
     exclude_ids: Array.isArray(excludeIds) ? excludeIds : [],
     participant_id: participantId || "",
   };
