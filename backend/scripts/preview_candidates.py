@@ -22,10 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from measure_reproducibility import DEFAULT_QUERIES  # noqa: E402  (실험과 같은 쿼리)
 
 
+# 화면 장르 목록에는 없지만 TMDB가 붙이는 장르 (표시용)
+EXTRA_GENRE_NAMES = {36: "역사", 10402: "음악", 10770: "TV 영화", 10762: "키즈", 10766: "연속극"}
+
+
 def genre_names(ids: list[int], media_type: str) -> str:
     from services.tmdb_service import MOVIE_GENRES, TV_GENRES
     table = TV_GENRES if media_type == "tv" else MOVIE_GENRES
-    names = {}
+    names = dict(EXTRA_GENRE_NAMES)
     for name, gid in table.items():
         if gid is not None:
             names.setdefault(gid, name)

@@ -13,6 +13,7 @@ def test_genre_names_by_media():
     assert pc.genre_names([18, 10751], "movie") == "드라마, 가족"
     assert pc.genre_names([10759, 10765], "tv") == "액션, 판타지"
     assert pc.genre_names([], "movie") == "-"
+    assert pc.genre_names([18, 36], "movie") == "드라마, 역사"
 
 
 def test_run_prints_inferred_genres_and_candidates(monkeypatch, capsys):
