@@ -98,7 +98,7 @@ def _patch_pipeline(monkeypatch, pool):
     monkeypatch.setenv("TMDB_API_KEY", "t")
     monkeypatch.setenv("LUXIA_API_KEY", "l")
 
-    async def fake_pool(client, request):
+    async def fake_pool(client, request, info=None):
         return pool
 
     async def fake_weights(client, query, refinements=None):

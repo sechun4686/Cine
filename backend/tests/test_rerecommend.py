@@ -90,7 +90,7 @@ def test_recommend_excludes_ids(monkeypatch):
     monkeypatch.setenv("LUXIA_API_KEY", "l")
     seen = {}
 
-    async def fake_pool(client, request):
+    async def fake_pool(client, request, info=None):
         return [{"id": 1, "media_type": "movie", "title": "a"}, {"id": 2, "media_type": "movie", "title": "b"}]
 
     async def fake_weights(client, query, refinements=None):

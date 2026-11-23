@@ -6,6 +6,9 @@ candidate_service.py
     1) 관련 후보군 만들기: 검색어가 있으면 유사도 상위 작품만 남긴다
        (예전에는 C2만 유사도를 봐서 검색어와 무관한 작품이 후보에 들어왔다)
     2) 관련 후보군 안에서 5가지 기준으로 1개씩 고른다
+       C1(평점·인기 균형), C3(최신작), C4(숨은 명작)도 기준 점수와 유사도를 섞어서 고른다
+       (관련 후보군은 상위 비율로 자르므로 검색어와 먼 작품도 섞여 있다.
+        예전에는 이 세 기준이 평점·인기만 봐서, 힐링 요청에 범죄·액션 인기작이 뽑혔다)
 
 ko-sroberta-multitask는 유사도 값이 전반적으로 낮게 나와 고정 임계값이 불안정하므로,
 절댓값 대신 상위 비율(RELEVANT_RATIO)로 자른다.
@@ -31,6 +34,32 @@ RECENT_YEARS = 2
 # 예전에는 장르 참신성만 봐서, 힐링 쿼리에 불륜·성인 로맨스물이 '의외의 추천'으로 뽑혔다
 UNEXPECTED_W_SIM = 0.6
 UNEXPECTED_W_NOVELTY = 0.4
+
+# C1·C3·C4 점수 = 기준 점수(0~1 정규화) * (1 - RELEVANCE_WEIGHT) + 유사도(0~1 정규화) * RELEVANCE_WEIGHT
+RELEVANCE_WEIGHT = 0.5
+
+
+def _minmax(values: list[float]) -> list[float]:
+    lo, hi = min(values), max(values)
+    if hi <= lo:
+        return [1.0] * len(values)
+    return [(v - lo) / (hi - lo) for v in values]
+
+
+def rank_with_relevance(items: list[dict], base_score, weight: float = RELEVANCE_WEIGHT) -> list[dict]:
+    """
+    기준 점수(base_score)와 검색어 유사도를 함께 반영해 정렬한다.
+    둘 다 items 안에서 0~1로 정규화한 뒤 섞는다. 검색어가 없어 유사도가 모두 같으면 기준 점수 순서와 같다.
+    """
+    if not items:
+        return []
+    base = _minmax([base_score(x) for x in items])
+    sims = _minmax([x["similarity"] for x in items])
+    scored = [
+        (b * (1 - weight) + s * weight, base_score(x), x)
+        for b, s, x in zip(base, sims, items)
+    ]
+    return [x for *_, x in sorted(scored, key=lambda t: (t[0], t[1]), reverse=True)]
 
 
 def _enrich(movie: dict, now_year: int) -> dict:
@@ -98,14 +127,13 @@ def select_candidates(
 
         return None
 
-    # C1: 평점과 인기도의 균형
-    c1 = pick(sorted(
+    # C1: 평점과 인기도의 균형 (+ 검색어 유사도)
+    c1 = pick(rank_with_relevance(
         _trusted(relevant),
-        key=lambda x: (
+        lambda x: (
             x["vote_average"] * 0.6
             + min(x["popularity"] / 100, 10) * 0.4
         ),
-        reverse=True,
     ))
 
     # C2: 검색어와 줄거리의 의미 유사도
@@ -115,28 +143,26 @@ def select_candidates(
         reverse=True,
     ))
 
-    # C3: 최근 작품을 우선 선정 (없으면 관련 후보 중 가장 최신)
+    # C3: 최근 작품을 우선 선정 (+ 검색어 유사도. 없으면 관련 후보 중 가장 최신)
     recent = [x for x in _trusted(relevant) if x["years_ago"] <= RECENT_YEARS]
-    c3 = pick(sorted(
+    c3 = pick(rank_with_relevance(
         recent,
-        key=lambda x: (
+        lambda x: (
             x["vote_average"] * 0.5
             + min(x["popularity"] / 100, 10) * 0.5
         ),
-        reverse=True,
     ))
 
     if c3 is None:
         c3 = pick(sorted(_trusted(relevant), key=lambda x: x["years_ago"]))
 
-    # C4: 평점은 높고 인기도는 상대적으로 낮은 작품 (투표 수가 충분한 작품만)
-    c4 = pick(sorted(
+    # C4: 평점은 높고 인기도는 상대적으로 낮은 작품 (투표 수가 충분한 작품만, + 검색어 유사도)
+    c4 = pick(rank_with_relevance(
         _trusted(relevant),
-        key=lambda x: (
+        lambda x: (
             x["vote_average"] * 0.7
             - min(x["popularity"] / 100, 10) * 0.3
         ),
-        reverse=True,
     ))
 
     # C5: 의외의 추천. 검색어와의 유사도를 유지하면서, 앞서 고른 작품들과
