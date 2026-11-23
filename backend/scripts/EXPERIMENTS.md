@@ -49,24 +49,33 @@ python scripts/weight_sensitivity.py scripts/results/reproducibility_t02-free_*_
 ## 실험 4. Single vs Multi agent 비교
 
 ```bash
-python scripts/compare_single_multi.py --runs 1 --queries 1 --label check   # 동작 확인 (LLM 약 36회)
-python scripts/compare_single_multi.py --runs 3 --label main                # 본 실험 (LLM 약 530회)
+python scripts/compare_single_multi.py --runs 1 --queries 1 --label check        # 동작 확인 (LLM 약 50회)
+python scripts/compare_single_multi.py --runs 3 --label full                      # 본 실험 (LLM 약 610회)
+python scripts/compare_single_multi.py --runs 3 --label score --single-mode score # 보조 분석 (LLM 약 535회)
 ```
 
 쿼리마다 후보 5편과 가중치를 한 번만 정해 고정하고, 회차마다 multi → single 순서로 평가한다.
-single(`services/single_agent_service.py`)은 같은 회차 multi의 세 에이전트가 고른 도구 데이터를 그대로 받아
-LLM 한 번 호출로 세 관점을 평가한다. 평가 기준 문구·점수 기준·가중치 계산도 같으므로 **다른 점은 역할 분리 하나**다.
+평가 기준 문구·점수 기준·가중치 계산·temperature는 두 방식이 같다.
+
+| single 모드 | 도구 선택 | 채점 | 후보 1편당 LLM 호출 | 비교로 알 수 있는 것 |
+|---|---|---|---|---|
+| multi (기준) | 에이전트 3개가 각자 | 에이전트 3개가 각자 | 6회 | - |
+| **full (기본)** | 에이전트 1개가 14개 도구 중 직접 선택 (관점마다 2~4개, 필수 도구는 multi와 같음) | 1회에 세 관점 | 2회 | **완전한 multi vs single**: 관점을 나눈 구조 전체의 효과 |
+| score | multi가 고른 데이터를 그대로 받음 | 1회에 세 관점 | 1회 | 채점을 나눈 효과만 (도구 선택은 multi와 같음) |
+
+full과 score 결과를 함께 보면 multi의 효과가 도구 선택에서 오는지, 채점에서 오는지 나눠 볼 수 있다.
+코드: `services/single_agent_service.py` (`evaluate_candidates_single(select_tools=True)`가 full 모드)
 
 보고서에 쓸 지표 (`compare_*.md`)
 1. 두 방식의 1위 일치율, 순위 상관(Kendall τ)
 2. 같은 후보에 대한 관점별 점수 차이(single − multi), 후보 간 점수 분산(작품을 얼마나 구분하는지)
 3. 방식별 일관성: 회차 간 점수 표준편차, 1위 일치율, 실패율 (`--runs 2` 이상)
-4. 비용: LLM 호출 수(후보 5편 기준 multi 30회 / single 5회), LLM 응답 시간 합
+4. 비용: LLM 호출 수, LLM 응답 시간 합, 전체 소요 시간
 
-설문 자료
-- `compare_*_survey.md`: 쿼리마다 두 방식의 1위 결과를 A/B로 무작위 배치 (방식 이름 없음). 구글 폼에 그대로 옮긴다
+설문 자료 (full 모드 결과로 만든다)
+- `compare_*_survey.md`: 쿼리마다 두 방식의 1위 결과를 A/B로 배치 (방식 이름·점수 없음, A/B 위치는 절반씩). 구글 폼에 그대로 옮긴다
 - `compare_*_survey_key.csv`: A/B 정답표. 참가자에게 보여주지 않는다
-- 두 방식 1위가 같은 작품인 문항(`same_title`)은 근거 설명만 비교하게 된다
+- 두 방식 1위가 같은 작품인 문항(`same_title`)은 근거 설명만 비교한다
 
 `compare_*_single_raw.csv`, `compare_*_multi_raw.csv`는 실험 1 원자료와 같은 형식이라
 `weight_sensitivity.py`에 넣어 두 방식의 가중치 민감도도 비교할 수 있다.

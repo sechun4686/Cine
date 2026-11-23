@@ -170,3 +170,37 @@ def build_single_prompt(candidate: dict, query: str, tool_data: dict) -> str:
         '"narrative": {"reason": "...", "score": 숫자}, '
         '"public": {"reason": "...", "score": 숫자}}\n'
     )
+
+
+def build_single_select_prompt(candidate: dict, query: str) -> str:
+    """
+    Single-agent(full) 도구 선택 프롬프트.
+    세 관점의 도구 14개를 한 목록으로 주고, multi-agent와 같은 제약(관점마다 MIN~MAX개)으로 고르게 한다.
+    """
+    sections = []
+    for agent_type in ("technical", "narrative", "public"):
+        tools = TOOL_REGISTRY[agent_type]
+        lines = "\n".join(f"- {name}: {spec['description']}" for name, spec in tools.items())
+        sections.append(f"({_SINGLE_SECTION_TITLES[agent_type]} 평가용)\n{lines}")
+    media = "드라마" if candidate.get("media_type") == "tv" else "영화"
+
+    return f"""너는 작품을 기술적 완성도, 서사, 대중성 세 관점에서 평가하기 전에, 어떤 데이터를 조회할지 정하는 역할이야.
+
+[작품]
+제목: {candidate.get('title', '')}
+유형: {media}
+사용자 요청: {query}
+
+[사용 가능한 도구]
+{chr(10).join(sections)}
+
+[규칙]
+1. 반드시 위 목록에 있는 도구 이름만 그대로 사용해. 목록에 없는 이름을 만들거나 바꾸지 마.
+2. 세 관점마다 그 관점의 도구를 {MIN_TOOLS}개 이상 {MAX_TOOLS}개 이하로 골라.
+3. 평가와 사용자 요청에 더 필요한 도구부터 순서대로 나열해.
+4. reason에는 왜 이 도구들을 골랐는지 1~2문장으로 써.
+5. 아래 JSON 형식 외에 다른 말은 절대 하지 마.
+
+출력 형식:
+{{"tools": ["도구이름1", "도구이름2", "..."], "reason": "선택 이유"}}
+"""

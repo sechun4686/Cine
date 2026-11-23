@@ -133,7 +133,8 @@ def test_full_run_single_gets_multi_data(monkeypatch, tmp_path):
     monkeypatch.setattr(single_agent_service, "attach_details", None)   # 호출되면 실패
     monkeypatch.setattr(single_agent_service, "run_tools", None)
 
-    asyncio.run(cmp.run(Namespace(runs=2, queries=1, label="t", out_dir=str(tmp_path), survey_run=1, seed=0)))
+    asyncio.run(cmp.run(Namespace(runs=2, queries=1, label="t", out_dir=str(tmp_path), survey_run=1, seed=0,
+                                  single_mode="score")))
 
     # single은 multi가 실행한 도구(기본 도구) 값을 그대로 받는다
     assert len(single_prompts) == 2 * 5
@@ -151,3 +152,70 @@ def test_full_run_single_gets_multi_data(monkeypatch, tmp_path):
     assert "### 결과 A:" in next(tmp_path.glob("*_survey.md")).read_text(encoding="utf-8")
     with open(next(tmp_path.glob("*_survey_key.csv")), encoding="utf-8-sig") as f:
         assert len(list(csv.DictReader(f))) == 1
+
+
+def test_full_run_single_selects_its_own_tools(monkeypatch, tmp_path):
+    """full 모드: single은 multi 데이터를 받지 않고, 도구 선택 1회 + 평가 1회로 독립 실행한다"""
+    import main
+    from services import agent_service, candidate_service, embedding_service, single_agent_service, weight_service
+
+    monkeypatch.setenv("TMDB_API_KEY", "t")
+    monkeypatch.setenv("LUXIA_API_KEY", "l")
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
+    single_selects, single_evals, single_tool_runs = [], [], []
+
+    async def fake_pool(client, request, info=None):
+        return [{"id": i, "media_type": "movie", "title": f"m{i}", "overview": "o"} for i in range(5)]
+
+    async def fake_weights(client, query):
+        return {"weights": {"technical": .3, "narrative": .4, "public": .3}, "importance": {}, "status": "ok"}
+
+    async def fake_details(client, candidates):
+        return [{} for _ in candidates]
+
+    async def fake_run_tools(ctx, agent_type, names):
+        return {n: f"{ctx.candidate['title']}-{n}-값" for n in names}, []
+
+    async def fake_single_run_tools(ctx, agent_type, names):
+        single_tool_runs.append((agent_type, list(names)))
+        return await fake_run_tools(ctx, agent_type, names)
+
+    async def fake_call(client, system, prompt, **kwargs):
+        if "세 관점에서 평가하기 전에" in prompt:
+            single_selects.append(prompt)
+            return '{"tools": ["director", "director_filmography", "keywords", "reviews"], "reason": "r"}'
+        if "데이터 조회 계획" in system:
+            return '{"tools": [], "reason": "-"}'
+        if "세 관점에서 평가하는 전문가" in prompt:
+            single_evals.append(prompt)
+            return ('{"technical": {"reason": "r", "score": 7}, "narrative": {"reason": "r", "score": 6}, '
+                    '"public": {"reason": "r", "score": 5}}')
+        return '{"reason": "r", "score": 8}'
+
+    monkeypatch.setattr(main, "_fetch_pool", fake_pool)
+    monkeypatch.setattr(weight_service, "infer_weights", fake_weights)
+    monkeypatch.setattr(embedding_service, "rank_candidates_by_similarity", lambda q, p: p)
+    monkeypatch.setattr(candidate_service, "select_candidates", lambda pool, q: pool)
+    monkeypatch.setattr(agent_service, "attach_details", fake_details)
+    monkeypatch.setattr(agent_service, "run_tools", fake_run_tools)
+    monkeypatch.setattr(agent_service, "call_luxia", fake_call)
+    monkeypatch.setattr(single_agent_service, "attach_details", fake_details)
+    monkeypatch.setattr(single_agent_service, "run_tools", fake_single_run_tools)
+    monkeypatch.setattr(single_agent_service, "call_luxia", fake_call)
+
+    asyncio.run(cmp.run(Namespace(runs=1, queries=1, label="f", out_dir=str(tmp_path), survey_run=1, seed=0,
+                                  single_mode="full")))
+
+    assert len(single_selects) == 5 and len(single_evals) == 5
+    # single이 고른 도구 + 관점별 필수·기본 도구로 검증된 목록만 실행한다
+    runs = dict(single_tool_runs[:3])
+    assert runs["technical"] == ["director", "director_filmography"]
+    assert runs["narrative"] == ["overview_full", "keywords"]
+    assert runs["public"] == ["vote_stats", "reviews"]
+    assert "m0-keywords-값" in single_evals[0] or any("keywords-값" in p for p in single_evals)
+
+    with open(next(tmp_path.glob("*_runs.csv")), encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    assert {(r["mode"], r["llm_calls"]) for r in rows} == {("multi", "30"), ("single", "10")}
+    md = next(p for p in tmp_path.glob("*.md") if not p.name.endswith("_survey.md")).read_text(encoding="utf-8")
+    assert "single(full)" in md and "두 방식 모두 TMDB 상세정보 조회" in md

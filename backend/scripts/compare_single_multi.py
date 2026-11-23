@@ -2,18 +2,24 @@
 compare_single_multi.py
 실험 4. Single-agent vs Multi-agent 비교
 
-같은 쿼리, 같은 후보, 같은 가중치, 같은 평가 데이터로 두 방식을 번갈아 실행해
+같은 쿼리, 같은 후보, 같은 가중치로 두 방식을 번갈아 실행해
 점수·순위·일관성·비용을 비교하고, 사용자 블라인드 설문용 A/B 결과를 만든다.
 
 실행 (backend 폴더에서)
-    python scripts/compare_single_multi.py                       # 기본: 쿼리 5개 x 3회
+    python scripts/compare_single_multi.py                       # 기본: full 모드, 쿼리 5개 x 3회
     python scripts/compare_single_multi.py --runs 1 --queries 1  # 동작 확인용
-    python scripts/compare_single_multi.py --runs 5 --label main
+    python scripts/compare_single_multi.py --single-mode score   # 채점만 단일화한 비교 (이전 방식)
+
+single 모드 (--single-mode)
+    full  (기본) : single 에이전트 1개가 세 관점의 도구 14개 중에서 직접 고르고 한 번에 평가한다
+                   도구 선택 제약(관점마다 2~4개, 필수 도구)은 multi와 같다
+                   -> 완전한 multi-agent vs single-agent 비교 (도구 선택 + 채점)
+    score        : multi의 세 에이전트가 고른 도구 데이터를 그대로 single에 넘긴다
+                   -> 두 방식은 같은 데이터를 보며, 채점을 나눈 효과만 비교한다
 
 측정 방식
     - 쿼리마다 후보 5편과 가중치는 처음 한 번만 정해 고정한다 (두 방식 모두 같은 값)
-    - 회차마다 multi를 먼저 실행하고, multi의 세 에이전트가 고른 도구 데이터를 그대로 single에 넘긴다
-      -> 두 방식은 같은 데이터를 보며, 다른 점은 '역할 분리' 하나뿐이다
+    - 평가 기준 문구·점수 기준·가중치 계산·temperature는 두 방식이 같다
     - Supabase에는 기록하지 않는다 (서비스 함수를 직접 호출)
 
 결과 (scripts/results/)
@@ -25,7 +31,7 @@ compare_single_multi.py
     compare_<label>_<시각>_survey.md        설문용 A/B 결과 (참가자에게 보여줄 내용, 방식 이름 없음)
     compare_<label>_<시각>_survey_key.csv   설문 정답표 (A/B가 어느 방식인지. 참가자에게 보여주지 말 것)
 
-LLM 호출 수: 쿼리 수 x (가중치 1 + 회차 x (multi 30 + single 5))
+LLM 호출 수: 쿼리 수 x (검색어 구조화 1 + 가중치 1 + 회차 x (multi 30 + single 10(full) 또는 5(score)))
 """
 
 import argparse
@@ -54,6 +60,13 @@ from measure_reproducibility import (  # noqa: E402  (실험 1과 같은 쿼리�
 )
 
 MODES = ("multi", "single")
+SINGLE_MODES = ("full", "score")
+SINGLE_MODE_NOTES = {
+    "full": "- single(full): 에이전트 1개가 세 관점의 도구를 직접 고르고 한 번에 평가 "
+            "(도구 선택 제약은 multi와 같음. 완전한 multi vs single 비교)",
+    "score": "- single(score): 같은 회차 multi의 세 에이전트가 고른 데이터를 그대로 받아 평가 "
+             "(다른 점은 채점을 나눴는지뿐)",
+}
 MODE_LABELS = {"multi": "Multi-agent", "single": "Single-agent"}
 AGENT_LABELS = {"technical": "기술적 완성도", "narrative": "서사", "public": "대중성"}
 RAW_FIELDS = ["query", "run", "rank", "item_key", "title", "agent", "score", "final_score", "tools",
@@ -198,7 +211,7 @@ def to_markdown(comparison: dict, mode_summaries: dict, cost: dict, meta: dict) 
         "",
         f"- 측정 시각: {meta['started']}",
         f"- 쿼리 {meta['queries']}개 x {meta['runs']}회, 쿼리마다 후보 5편과 가중치 고정",
-        "- single은 같은 회차 multi의 세 에이전트가 고른 데이터를 그대로 받아 평가 (다른 점은 역할 분리뿐)",
+        SINGLE_MODE_NOTES[meta.get("single_mode", "score")],
         f"- 평가 temperature: {meta['eval_temperature']}, 소요 시간: {meta['elapsed_min']:.1f}분",
         "",
         "## 1. 두 방식의 추천이 같은가",
@@ -263,12 +276,12 @@ def to_markdown(comparison: dict, mode_summaries: dict, cost: dict, meta: dict) 
         c = cost[mode]
         lines.append(f"| {MODE_LABELS[mode]} | {fmt(c['llm_calls'], 1)} | {fmt(c['llm_sec'], 1)} | "
                      f"{fmt(c['wall_sec'], 1)} |")
-    lines += [
-        "",
-        "전체 소요 시간: multi는 TMDB 데이터 수집을 포함하고, single은 multi가 모은 데이터를 재사용하므로 "
-        "평가 시간만 포함한다. 두 방식의 계산 비용은 LLM 호출 수와 LLM 응답 시간 합으로 비교한다.",
-        "",
-    ]
+    if meta.get("single_mode", "score") == "score":
+        note = ("전체 소요 시간: multi는 TMDB 데이터 수집을 포함하고, single은 multi가 모은 데이터를 재사용하므로 "
+                "평가 시간만 포함한다. 두 방식의 계산 비용은 LLM 호출 수와 LLM 응답 시간 합으로 비교한다.")
+    else:
+        note = "전체 소요 시간: 두 방식 모두 TMDB 상세정보 조회, 도구 실행, 평가를 포함한다."
+    lines += ["", note, ""]
     return "\n".join(lines)
 
 
@@ -348,6 +361,7 @@ async def run(args) -> None:
     agent_service.call_luxia = metered(agent_service.call_luxia)
     single_agent_service.call_luxia = metered(single_agent_service.call_luxia)
 
+    single_mode = getattr(args, "single_mode", "full")
     queries = DEFAULT_QUERIES[: args.queries]
     out_dir = Path(args.out_dir) if args.out_dir else BACKEND_DIR / "scripts" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -390,13 +404,19 @@ async def run(args) -> None:
                                      "llm_calls": meter["calls"], "llm_sec": round(meter["sec"], 2),
                                      "wall_sec": round(time.perf_counter() - t0, 2)})
 
-                    # 2) single: multi가 고른 데이터를 그대로 사용
-                    #    (evaluate_candidates가 입력 dict에 결과를 붙이므로 multi_cands는 원래 순서 그대로다)
-                    data = [tool_data_from_multi(c) for c in multi_cands]
+                    # 2) single
                     meter.update(calls=0, sec=0.0)
                     t0 = time.perf_counter()
-                    ranked["single"] = await evaluate_candidates_single(
-                        client, copy.deepcopy(fixed), query, weights, tool_data_list=data)
+                    if single_mode == "full":
+                        # 에이전트 1개가 도구를 직접 골라 평가 (TMDB 조회부터 독립 실행)
+                        ranked["single"] = await evaluate_candidates_single(
+                            client, copy.deepcopy(fixed), query, weights, select_tools=True)
+                    else:
+                        # multi가 고른 데이터를 그대로 사용
+                        # (evaluate_candidates가 입력 dict에 결과를 붙이므로 multi_cands는 원래 순서 그대로다)
+                        data = [tool_data_from_multi(c) for c in multi_cands]
+                        ranked["single"] = await evaluate_candidates_single(
+                            client, copy.deepcopy(fixed), query, weights, tool_data_list=data)
                     run_rows.append({"mode": "single", "query": query, "run": run_no,
                                      "llm_calls": meter["calls"], "llm_sec": round(meter["sec"], 2),
                                      "wall_sec": round(time.perf_counter() - t0, 2)})
@@ -428,7 +448,7 @@ async def run(args) -> None:
     meta = {
         "label": args.label, "started": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "queries": len(queries), "runs": args.runs, "eval_temperature": agent_service.EVAL_TEMPERATURE,
-        "elapsed_min": (time.perf_counter() - started) / 60,
+        "elapsed_min": (time.perf_counter() - started) / 60, "single_mode": single_mode,
     }
     report = to_markdown(compare_modes(rows["multi"], rows["single"]),
                          {m: summarize(rows[m]) for m in MODES}, summarize_cost(run_rows), meta)
@@ -453,13 +473,15 @@ def main_cli() -> None:
     parser.add_argument("--out-dir", default="", help="결과 저장 폴더 (기본 scripts/results)")
     parser.add_argument("--survey-run", type=int, default=1, help="설문 자료로 쓸 회차 (기본 1)")
     parser.add_argument("--seed", type=int, default=0, help="설문 A/B 배치 무작위 seed")
+    parser.add_argument("--single-mode", choices=SINGLE_MODES, default="full",
+                        help="full: single이 도구를 직접 선택 (기본) / score: multi가 고른 데이터로 채점만")
     parser.add_argument("--show-scores", action="store_true",
                         help="설문 자료에 관점별 점수도 표시 (기본: 근거만 표시)")
     args = parser.parse_args()
     if not 1 <= args.survey_run <= args.runs:
         parser.error("--survey-run은 1 이상 --runs 이하여야 합니다.")
 
-    calls = args.queries * (1 + args.runs * 35)
+    calls = args.queries * (2 + args.runs * (40 if args.single_mode == "full" else 35))
     print(f"쿼리 {args.queries}개 x {args.runs}회, LLM 호출 약 {calls}회")
     asyncio.run(run(args))
 
