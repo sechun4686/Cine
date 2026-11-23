@@ -24,7 +24,8 @@ def test_run_prints_inferred_genres_and_candidates(monkeypatch, capsys):
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
 
     async def fake_pool(client, request, info=None):
-        info["genre_result"] = {"genres": ["드라마"], "reason": "따뜻한 분위기", "status": "ok"}
+        info["query_structure"] = {"include_genres": ["드라마"], "exclude_genres": ["공포"],
+                                   "reason": "따뜻한 분위기", "status": "ok"}
         return [{"id": 1, "title": "작품", "media_type": "movie", "genre_ids": [18], "year": "2020",
                  "vote_average": 7.5, "vote_count": 300, "similarity": 0.4}]
 
@@ -34,5 +35,6 @@ def test_run_prints_inferred_genres_and_candidates(monkeypatch, capsys):
 
     asyncio.run(pc.run([{"query": "힐링 영화", "media": ["movie"], "ott": []}]))
     out = capsys.readouterr().out
-    assert "['드라마'] [ok] 따뜻한 분위기" in out
+    assert "포함 장르: ['드라마']" in out and "제외 장르: ['공포']" in out
+    assert "판단 근거: [ok] 따뜻한 분위기" in out
     assert "[검색어 유사도] 작품 (2020, movie)  유사도 0.400 · 평점 7.5(300표) · 장르 드라마" in out

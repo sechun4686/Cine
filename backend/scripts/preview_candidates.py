@@ -1,7 +1,7 @@
 """
 preview_candidates.py
-검색어마다 '추론한 장르 -> 후보군 -> 후보 5편'만 출력해 후보 선정이 요청에 맞는지 확인한다.
-에이전트 평가는 하지 않는다 (LLM 호출: 장르를 고르지 않은 쿼리마다 장르 추론 1회).
+검색어마다 'Query Structuring(포함/제외 장르) -> 후보군 -> 후보 5편'만 출력해 후보 선정이 요청에 맞는지 확인한다.
+에이전트 평가는 하지 않는다 (LLM 호출: 쿼리마다 검색어 구조화 1회).
 
 실행 (backend 폴더에서)
     python scripts/preview_candidates.py                                   # 실험 쿼리 5개
@@ -32,14 +32,23 @@ def genre_names(ids: list[int], media_type: str) -> str:
     return ", ".join(names.get(i, str(i)) for i in ids) or "-"
 
 
-def format_candidates(query: str, info: dict, pool_size: int, candidates: list[dict]) -> str:
-    genre = info.get("genre_result")
-    if genre is None:
-        genre_line = "사용자가 고른 장르 사용 (추론 안 함)"
+def format_candidates(query: str, info: dict, pool_size: int, candidates: list[dict],
+                      user_genres: list[str] | None = None) -> str:
+    st = info.get("query_structure") or {}
+    include = st.get("include_genres") or []
+    if user_genres:
+        include_line = f"{user_genres} (사용자 선택. 추론한 {include or '없음'}은 쓰지 않음)"
     else:
-        genre_line = f"{genre['genres'] or '없음 (장르 조건 없이 수집)'} [{genre['status']}] {genre['reason']}"
+        include_line = f"{include or '없음 (장르 조건 없이 수집)'}"
 
-    lines = [f"\n[검색어] {query}", f"  추론한 장르: {genre_line}", f"  후보군: {pool_size}편", "  후보 5편:"]
+    lines = [
+        f"\n[검색어] {query}",
+        f"  포함 장르: {include_line}",
+        f"  제외 장르: {st.get('exclude_genres') or '없음'}",
+        f"  판단 근거: [{st.get('status', '-')}] {st.get('reason', '-')}",
+        f"  후보군: {pool_size}편",
+        "  후보 5편:",
+    ]
     for c in candidates:
         media = c.get("media_type", "movie")
         lines.append(
@@ -70,7 +79,7 @@ async def run(specs: list[dict]) -> None:
             pool = await main._fetch_pool(client, request, info)
             pool = await asyncio.to_thread(rank_candidates_by_similarity, request.query, pool)
             candidates = select_candidates(pool, request.query)
-            print(format_candidates(request.query, info, len(pool), candidates))
+            print(format_candidates(request.query, info, len(pool), candidates, request.genres))
 
 
 def main_cli() -> None:

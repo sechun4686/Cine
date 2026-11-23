@@ -110,17 +110,21 @@ async def fetch_filtered_pool(
     runtime: int,
     target_count: int = 60,
     required_genres: list[str] | None = None,
+    exclude_genres: list[str] | None = None,
 ) -> list[dict]:
     """
     사용자 조건으로 TMDB 후보를 필터링해 수집한다.
 
     genres          : 이 중 하나라도 해당하면 된다 (OR). 화면에서 여러 장르를 고른 경우
     required_genres : 반드시 해당해야 한다 (AND). 예: 애니메이션 매체를 고른 경우 '애니메이션'
+    exclude_genres  : 하나라도 해당하면 뺀다. 예: 힐링 요청이면 범죄·공포
     TMDB는 AND와 OR을 한 조건에 섞을 수 없어서, 둘 다 있으면 required는 API로 걸고
     genres는 받아온 결과에서 거른다.
     """
     any_ids = genre_ids(genres, media_type)
     all_ids = genre_ids(required_genres or [], media_type)
+    # 포함·필수 장르와 겹치는 제외 장르는 쓰지 않는다 (TV는 액션·모험처럼 한 번호를 나눠 쓰기도 한다)
+    none_ids = [i for i in genre_ids(exclude_genres or [], media_type) if i not in any_ids + all_ids]
 
     provider_ids = [
         OTT_MAP[p]
@@ -143,7 +147,9 @@ async def fetch_filtered_pool(
         post_filter = set()
 
     if media_type == "tv":
-        params["without_genres"] = ",".join(map(str, TV_EXCLUDED_GENRES))
+        none_ids = list(dict.fromkeys([*TV_EXCLUDED_GENRES, *none_ids]))
+    if none_ids:
+        params["without_genres"] = ",".join(map(str, none_ids))
 
     if provider_ids:
         params["with_watch_providers"] = "|".join(

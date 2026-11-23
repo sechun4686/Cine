@@ -1,4 +1,4 @@
-"""후보군 수집 개선: TV 장르 번호, 장르 OR 검색, 예능 제외, 검색어 장르 추론, 유사도 반영 후보 선정"""
+"""후보군 수집 개선: TV 장르 번호, 장르 OR 검색, 예능 제외, Query Structuring(포함/제외 장르), 유사도 반영 후보 선정"""
 import asyncio
 import sys
 import types
@@ -9,7 +9,7 @@ import pytest
 sys.modules.setdefault("sentence_transformers", types.SimpleNamespace(SentenceTransformer=object))
 
 import main  # noqa: E402
-from services import genre_service, tmdb_service  # noqa: E402
+from services import query_service, tmdb_service  # noqa: E402
 from services.candidate_service import rank_with_relevance, select_candidates  # noqa: E402
 
 
@@ -62,78 +62,118 @@ async def test_required_genre_is_and_and_other_genres_filter_results(monkeypatch
     assert [p["id"] for p in pool] == [1, 3]                    # 코미디 또는 가족만 남김
 
 
+async def test_exclude_genres_become_without_genres(monkeypatch):
+    client, seen = _discover(monkeypatch, [_item(1, [18])])
+    async with client:
+        await tmdb_service.fetch_filtered_pool(
+            client, "movie", ["드라마", "범죄"], [], 120, target_count=5, exclude_genres=["범죄", "공포", "없는장르"])
+    assert seen[0]["without_genres"] == "27"          # 포함 장르와 겹치는 범죄는 빼지 않는다
+
+    client, seen = _discover(monkeypatch, [_item(1, [18])])
+    async with client:
+        await tmdb_service.fetch_filtered_pool(
+            client, "tv", [], [], 120, target_count=5, exclude_genres=["범죄", "스릴러"])
+    assert seen[0]["without_genres"] == "10764,10767,10763,80"   # TV 기본 제외 + 범죄 (스릴러는 TV에 없음)
+
+
 # ------------------------------------------------------------------
-# genre_service
+# query_service (Query Structuring)
 # ------------------------------------------------------------------
-def test_validate_genres():
-    ok = genre_service.validate_genres('{"genres": ["드라마", "가족"], "reason": "r"}')
-    assert ok == {"genres": ["드라마", "가족"], "reason": "r", "status": "ok"}
+def test_validate_structure():
+    ok = query_service.validate_structure(
+        '{"include_genres": ["드라마", "가족"], "exclude_genres": ["공포", "범죄"], "reason": "r"}')
+    assert ok == {"include_genres": ["드라마", "가족"], "exclude_genres": ["공포", "범죄"],
+                  "reason": "r", "status": "ok"}
 
-    f = genre_service.validate_genres('{"genres": ["드라마", "힐링", "드라마", "가족", "코미디", "SF"]}')
-    assert f["genres"] == ["드라마", "가족", "코미디"] and f["status"] == "filtered"
+    f = query_service.validate_structure(
+        '{"include_genres": ["드라마", "힐링", "드라마", "가족", "코미디", "SF"],'
+        ' "exclude_genres": ["드라마", "공포", "범죄", "스릴러", "전쟁", "서부"]}')
+    assert f["include_genres"] == ["드라마", "가족", "코미디"]
+    assert f["exclude_genres"] == ["공포", "범죄", "스릴러"]      # 4개로 자른 뒤 포함과 겹치는 드라마 제거
+    assert f["status"] == "filtered"
 
-    assert genre_service.validate_genres('{"genres": []}')["status"] == "empty"
-    assert genre_service.validate_genres("장르는 드라마") == {
-        "genres": [], "reason": "장르 추론 결과를 해석하지 못함", "status": "fallback"}
+    only_exclude = query_service.validate_structure('{"include_genres": [], "exclude_genres": ["공포"]}')
+    assert only_exclude["exclude_genres"] == ["공포"] and only_exclude["status"] == "ok"
+
+    assert query_service.validate_structure('{"include_genres": [], "exclude_genres": []}')["status"] == "empty"
+    assert query_service.validate_structure("장르는 드라마")["status"] == "fallback"
 
 
-async def test_infer_genres_skips_llm_without_query(monkeypatch):
+async def test_structure_query_skips_llm_without_query(monkeypatch):
     async def must_not_call(*a, **k):
         raise AssertionError
-    monkeypatch.setattr(genre_service, "call_luxia", must_not_call)
-    assert (await genre_service.infer_genres(None, "  "))["genres"] == []
+    monkeypatch.setattr(query_service, "call_luxia", must_not_call)
+    r = await query_service.structure_query(None, "  ")
+    assert r["include_genres"] == [] and r["exclude_genres"] == []
 
 
-async def test_infer_genres_survives_llm_error(monkeypatch):
+async def test_structure_query_survives_llm_error(monkeypatch):
     async def broken(*a, **k):
         raise RuntimeError("down")
-    monkeypatch.setattr(genre_service, "call_luxia", broken)
-    assert (await genre_service.infer_genres(None, "힐링"))["status"] == "fallback"
+    monkeypatch.setattr(query_service, "call_luxia", broken)
+    assert (await query_service.structure_query(None, "힐링"))["status"] == "fallback"
 
 
 # ------------------------------------------------------------------
 # main._fetch_pool
 # ------------------------------------------------------------------
-def _capture_fetch(monkeypatch):
+def _capture_fetch(monkeypatch, empty_when=None):
     calls = []
 
-    async def fake_fetch(client, media_type, genres, ott, runtime, target_count=60, required_genres=None):
-        calls.append((media_type, list(genres), list(required_genres or [])))
+    async def fake_fetch(client, media_type, genres, ott, runtime, target_count=60,
+                         required_genres=None, exclude_genres=None):
+        call = (media_type, list(genres), list(required_genres or []), list(exclude_genres or []))
+        calls.append(call)
+        if empty_when and empty_when(call):
+            return []
         return [{"id": len(calls), "media_type": media_type, "title": "x"}]
 
     monkeypatch.setattr(main, "fetch_filtered_pool", fake_fetch)
     return calls
 
 
-async def test_fetch_pool_uses_inferred_genres_when_user_chose_none(monkeypatch):
-    calls = _capture_fetch(monkeypatch)
+def _structure(monkeypatch, include, exclude):
     queries = []
 
-    async def fake_infer(client, query):
+    async def fake_structure(client, query):
         queries.append(query)
-        return {"genres": ["드라마", "가족"], "reason": "-", "status": "ok"}
+        return {"include_genres": include, "exclude_genres": exclude, "reason": "-", "status": "ok"}
 
-    monkeypatch.setattr(main, "infer_genres", fake_infer)
+    monkeypatch.setattr(main, "structure_query", fake_structure)
+    return queries
+
+
+async def test_fetch_pool_uses_structured_genres_when_user_chose_none(monkeypatch):
+    calls = _capture_fetch(monkeypatch)
+    queries = _structure(monkeypatch, ["드라마", "가족"], ["공포", "애니메이션"])
     info = {}
     req = main.RecommendRequest(query="힐링 영화", refinements=["최근 작품"], media=["movie", "animation"])
     await main._fetch_pool(None, req, info)
 
     assert queries == [main.combine_query("힐링 영화", ["최근 작품"])]
-    assert calls == [("movie", ["드라마", "가족"], []), ("movie", ["드라마", "가족"], ["애니메이션"])]
-    assert info["genre_result"]["genres"] == ["드라마", "가족"]
+    assert calls == [
+        ("movie", ["드라마", "가족"], [], ["공포", "애니메이션"]),
+        ("movie", ["드라마", "가족"], ["애니메이션"], ["공포"]),   # 애니메이션 매체는 애니메이션을 빼지 않는다
+    ]
+    assert info["query_structure"]["exclude_genres"] == ["공포", "애니메이션"]
+    assert main._structure_log(info["query_structure"]) == {
+        "include_genres": ["드라마", "가족"], "exclude_genres": ["공포", "애니메이션"], "status": "ok"}
 
 
-async def test_fetch_pool_keeps_user_genres_without_llm(monkeypatch):
+async def test_user_genres_win_but_exclusions_still_apply(monkeypatch):
     calls = _capture_fetch(monkeypatch)
+    _structure(monkeypatch, ["드라마"], ["범죄", "공포"])
+    await main._fetch_pool(None, main.RecommendRequest(query="q", genres=["범죄", "액션"], media=["tv"]), {})
+    # 사용자가 고른 장르를 쓰고, 사용자가 고른 범죄는 제외하지 않는다
+    assert calls == [("tv", ["범죄", "액션"], [], ["공포"])]
 
-    async def must_not_call(*a, **k):
-        raise AssertionError("사용자가 장르를 골랐으면 추론하지 않는다")
 
-    monkeypatch.setattr(main, "infer_genres", must_not_call)
-    info = {}
-    await main._fetch_pool(None, main.RecommendRequest(query="q", genres=["액션"], media=["tv"]), info)
-    assert calls == [("tv", ["액션"], [])]
-    assert "genre_result" not in info
+async def test_fetch_pool_relaxes_include_then_exclude(monkeypatch):
+    calls = _capture_fetch(monkeypatch, empty_when=lambda c: bool(c[1]) or bool(c[3]))
+    _structure(monkeypatch, ["드라마"], ["공포"])
+    pool = await main._fetch_pool(None, main.RecommendRequest(query="q", media=["movie"]), {})
+    assert [c[1:] for c in calls] == [(["드라마"], [], ["공포"]), ([], [], ["공포"]), ([], [], [])]
+    assert len(pool) == 1
 
 
 # ------------------------------------------------------------------

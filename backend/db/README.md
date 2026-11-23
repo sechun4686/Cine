@@ -11,6 +11,9 @@
 | `candidates` | 요청마다 평가한 후보 1개 | 순위, 세 에이전트 점수, 최종 점수, 평가 근거, 선택한 도구 |
 | `feedback` | 결과 화면 버튼 클릭 1회 | 이거 볼래요 / 이미 봤어요 / 관심 없어요 / 추가 요청으로 다시 추천(`refine`), 몇 번째 추천이었는지, 재추천된 작품, 추가 요청 문장 |
 
+`recommendations.filters`에는 입력 조건과 함께 검색어 구조화 결과(`query_structure`: 후보군 수집에 쓴 포함/제외 장르)가 들어갑니다.
+기존 jsonb 열에 들어가므로 스키마 변경은 필요 없습니다.
+
 세 테이블은 `request_id`로 연결됩니다. 자세한 컬럼은 `schema.sql`을 보세요.
 추가 요청으로 다시 검색한 추천은 `recommendations.parent_request_id`에 직전 추천의 `request_id`가 남습니다.
 

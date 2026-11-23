@@ -16,10 +16,10 @@ from services.agent_service import evaluate_candidates
 from services.candidate_service import select_candidates
 from services.editor_service import build_editor_prompt
 from services.embedding_service import rank_candidates_by_similarity
+from services.query_service import structure_query
 from services.llm_service import call_luxia
 from services.rerecommend_service import candidate_key, pick_alternative
 from services import log_service
-from services.genre_service import infer_genres
 from services.tmdb_service import fetch_filtered_pool
 from services.weight_service import combine_query, infer_weights
 
@@ -160,7 +160,7 @@ async def search_tmdb(
 # ------------------------------------------------------------------
 # 추천 파이프라인
 #   1) 후보군 수집 (TMDB 하드 필터)      tmdb_service.fetch_filtered_pool
-#      (장르를 안 골랐으면 검색어로 장르 추론 후 수집)  genre_service.infer_genres
+#      (Lead Editor 계획 단계: 검색어 -> 포함/제외 장르)  query_service.structure_query
 #      + 가중치 추론 (동시에 실행)         weight_service.infer_weights
 #   2) 검색어-줄거리 유사도 계산          embedding_service.rank_candidates_by_similarity
 #   3) 후보 5개 선별                     candidate_service.select_candidates
@@ -193,31 +193,40 @@ def _resolve_media(request: RecommendRequest, genres: list[str] | None = None) -
 
 async def _fetch_pool(client: httpx.AsyncClient, request: RecommendRequest, info: dict | None = None) -> list[dict]:
     """
-    매체별로 후보를 모아 합친다. 장르 조건으로 비면 장르 조건을 빼고 한 번 더 찾는다.
-    사용자가 장르를 고르지 않았으면 검색어로 장르를 추론해 쓴다 (info["genre_result"]에 기록).
+    매체별로 후보를 모아 합친다.
+    검색어가 있으면 Query Structuring으로 포함/제외 장르를 정한다 (info["query_structure"]에 기록).
+        포함 장르: 사용자가 장르를 고르지 않았을 때만 쓴다
+        제외 장르: 항상 쓰되, 사용자가 직접 고른 장르는 빼지 않는다
+    조건 때문에 결과가 비면 포함 장르 -> 제외 장르 순서로 조건을 풀어 다시 찾는다.
     """
-    genres = list(request.genres)
-    if not genres:
-        genre_result = await infer_genres(client, combine_query(request.query, request.refinements))
-        genres = genre_result["genres"]
-        if info is not None:
-            info["genre_result"] = genre_result
+    structure = await structure_query(client, combine_query(request.query, request.refinements))
+    if info is not None:
+        info["query_structure"] = structure
+
+    genres = list(request.genres) or structure["include_genres"]
+    exclude = [g for g in structure["exclude_genres"] if g not in request.genres]
 
     targets = _resolve_media(request, genres)
     per_media = max(POOL_SIZE // len(targets), 20)
 
     async def fetch_one(media_type: str, genres: list[str], required: list[str]) -> list[dict]:
-        pool = await fetch_filtered_pool(
-            client, media_type, genres, request.ott, request.runtime, target_count=per_media,
-            required_genres=required,
-        )
-        if not pool and genres:
-            print(f"[recommend] {media_type} 장르 조건 결과 없음 -> 장르 조건 완화 후 재검색")
+        excluded = [g for g in exclude if g not in required]   # 애니메이션 매체에서 애니메이션은 빼지 않는다
+        attempts = [(genres, excluded)]
+        if genres:
+            attempts.append(([], excluded))
+        if excluded:
+            attempts.append(([], []))
+
+        for i, (g, ex) in enumerate(attempts):
+            if i:
+                print(f"[recommend] {media_type} 조건 결과 없음 -> 조건 완화 후 재검색 (포함 {g}, 제외 {ex})")
             pool = await fetch_filtered_pool(
-                client, media_type, [], request.ott, request.runtime, target_count=per_media,
-                required_genres=required,
+                client, media_type, g, request.ott, request.runtime, target_count=per_media,
+                required_genres=required, exclude_genres=ex,
             )
-        return pool
+            if pool:
+                return pool
+        return []
 
     results = await asyncio.gather(*(fetch_one(m, g, r) for m, g, r in targets))
 
@@ -227,6 +236,12 @@ async def _fetch_pool(client: httpx.AsyncClient, request: RecommendRequest, info
         for item in pool:
             merged.setdefault((item["media_type"], item["id"]), item)
     return list(merged.values())
+
+
+def _structure_log(structure: dict | None) -> dict | None:
+    if not structure:
+        return None
+    return {k: structure.get(k) for k in ("include_genres", "exclude_genres", "status")}
 
 
 async def _write_editor_comment(client: httpx.AsyncClient, query: str, best: dict) -> str:
@@ -391,8 +406,8 @@ async def _recommend_logged(request: RecommendRequest, emit: Callable[[dict], No
             query=combine_query(request.query, request.refinements),
             filters={"ott": request.ott, "genres": request.genres, "media": request.media,
                      "runtime": request.runtime,
-                     # 장르를 안 골랐을 때 검색어로 추론해 후보군 수집에 쓴 장르
-                     "inferred_genres": (info.get("genre_result") or {}).get("genres")},
+                     # Query Structuring 결과: 후보군 수집에 쓴 포함/제외 장르
+                     "query_structure": _structure_log(info.get("query_structure"))},
             exclude_ids=request.exclude_ids,
             parent_request_id=request.parent_request_id,
             elapsed_sec=time.perf_counter() - started,
