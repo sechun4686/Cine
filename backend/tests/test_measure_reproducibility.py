@@ -57,7 +57,7 @@ def test_full_run_with_fake_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
     calls = {"pool": 0, "eval": 0}
 
-    async def fake_pool(client, request):
+    async def fake_pool(client, request, info=None):
         calls["pool"] += 1
         return [{"id": i, "media_type": "movie", "title": f"m{i}"} for i in range(5)]
 
