@@ -22,6 +22,23 @@ def test_genre_ids_use_tv_numbers_and_drop_missing():
     assert tmdb_service.genre_ids(["없는장르"], "movie") == []
 
 
+def test_tv_include_genres_fall_back_to_similar_tv_genres():
+    # TV에 없는 공포·스릴러·로맨스는 포함 조건일 때만 비슷한 장르로 바꾼다
+    assert tmdb_service.genre_ids(["공포", "스릴러"], "tv", fallback=True) == [9648]
+    assert tmdb_service.genre_ids(["로맨스", "코미디"], "tv", fallback=True) == [18, 35]
+    assert tmdb_service.genre_ids(["공포"], "tv") == []                    # 기본(제외 조건)은 바꾸지 않는다
+    assert tmdb_service.genre_ids(["공포"], "movie", fallback=True) == [27]
+
+
+async def test_tv_horror_request_keeps_a_genre_filter(monkeypatch):
+    client, seen = _discover(monkeypatch, [_item(1, [9648])])
+    async with client:
+        await tmdb_service.fetch_filtered_pool(
+            client, "tv", ["공포", "스릴러"], [], 120, target_count=5, exclude_genres=["로맨스", "가족"])
+    assert seen[0]["with_genres"] == "9648"                       # 장르 조건이 사라지지 않는다
+    assert seen[0]["without_genres"] == "10764,10767,10763,10751"  # 제외의 로맨스는 드라마로 바꾸지 않는다
+
+
 def _discover(monkeypatch, results):
     """discover 호출 파라미터를 기록하는 가짜 TMDB"""
     monkeypatch.setenv("TMDB_API_KEY", "t")
@@ -117,7 +134,8 @@ async def test_structure_query_survives_llm_error(monkeypatch):
 # ------------------------------------------------------------------
 # main._fetch_pool
 # ------------------------------------------------------------------
-def _capture_fetch(monkeypatch, empty_when=None):
+def _capture_fetch(monkeypatch, empty_when=None, count=20, count_when=None):
+    """count_when(call) -> 그 호출에서 돌려줄 작품 수 (없으면 count). empty_when은 0편"""
     calls = []
 
     async def fake_fetch(client, media_type, genres, ott, runtime, target_count=60,
@@ -126,7 +144,8 @@ def _capture_fetch(monkeypatch, empty_when=None):
         calls.append(call)
         if empty_when and empty_when(call):
             return []
-        return [{"id": len(calls), "media_type": media_type, "title": "x"}]
+        n = count_when(call) if count_when else count
+        return [{"id": f"{len(calls)}-{k}", "media_type": media_type, "title": "x"} for k in range(n)]
 
     monkeypatch.setattr(main, "fetch_filtered_pool", fake_fetch)
     return calls
@@ -173,7 +192,24 @@ async def test_fetch_pool_relaxes_include_then_exclude(monkeypatch):
     _structure(monkeypatch, ["드라마"], ["공포"])
     pool = await main._fetch_pool(None, main.RecommendRequest(query="q", media=["movie"]), {})
     assert [c[1:] for c in calls] == [(["드라마"], [], ["공포"]), ([], [], ["공포"]), ([], [], [])]
-    assert len(pool) == 1
+    assert len(pool) == 20
+
+
+async def test_small_pool_is_topped_up_with_matching_titles_first(monkeypatch):
+    # 조건에 맞는 작품이 3편뿐이면 포함 장르를 풀어 보충하고, 맞는 작품을 앞에 둔다
+    calls = _capture_fetch(monkeypatch, count_when=lambda c: 3 if c[1] else 20)
+    _structure(monkeypatch, ["공포"], ["가족"])
+    pool = await main._fetch_pool(None, main.RecommendRequest(query="q", media=["movie"]), {})
+    assert [c[1:] for c in calls] == [(["공포"], [], ["가족"]), ([], [], ["가족"])]
+    assert [p["id"] for p in pool[:3]] == ["1-0", "1-1", "1-2"]
+    assert len(pool) == 23
+
+
+async def test_enough_titles_do_not_relax(monkeypatch):
+    calls = _capture_fetch(monkeypatch, count=main.MIN_POOL_PER_MEDIA)
+    _structure(monkeypatch, ["드라마"], ["공포"])
+    await main._fetch_pool(None, main.RecommendRequest(query="q", media=["movie"]), {})
+    assert len(calls) == 1
 
 
 # ------------------------------------------------------------------
