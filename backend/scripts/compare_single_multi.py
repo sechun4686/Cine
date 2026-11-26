@@ -8,6 +8,7 @@ compare_single_multi.py
 실행 (backend 폴더에서)
     python scripts/compare_single_multi.py                       # 기본: full 모드, 쿼리 5개 x 3회
     python scripts/compare_single_multi.py --runs 1 --queries 1  # 동작 확인용
+    python scripts/compare_single_multi.py --query-set new       # 추가 쿼리 5개 (설문 B형)
     python scripts/compare_single_multi.py --single-mode score   # 채점만 단일화한 비교 (이전 방식)
 
 single 모드 (--single-mode)
@@ -58,6 +59,19 @@ from measure_reproducibility import (  # noqa: E402  (실험 1과 같은 쿼리�
     kendall_tau,
     summarize,
 )
+
+# 쿼리 세트
+#   base : 실험 1과 같은 쿼리 5개 (measure_reproducibility.DEFAULT_QUERIES, 설문 A형)
+#   new  : 추가 쿼리 5개 (설문 B형). 결과를 보기 전에 정한 목록이다 (상황·대상·제외 조건·매체를 넓힘)
+#   all  : 둘을 합친 10개
+NEW_QUERIES = [
+    {"query": "비 오는 날 혼자 보기 좋은 잔잔한 로맨스", "media": ["movie"], "ott": ["넷플릭스"]},
+    {"query": "친구들이랑 웃으면서 가볍게 볼 코미디", "media": ["movie"], "ott": []},
+    {"query": "주말에 정주행하기 좋은 몰입감 있는 범죄 수사 드라마", "media": ["tv"], "ott": ["넷플릭스"]},
+    {"query": "무섭지만 너무 잔인하지는 않은 공포 영화", "media": ["movie"], "ott": []},
+    {"query": "생각할 거리를 주는 SF 영화", "media": ["movie"], "ott": []},
+]
+QUERY_SETS = {"base": DEFAULT_QUERIES, "new": NEW_QUERIES, "all": DEFAULT_QUERIES + NEW_QUERIES}
 
 MODES = ("multi", "single")
 SINGLE_MODES = ("full", "score")
@@ -210,7 +224,7 @@ def to_markdown(comparison: dict, mode_summaries: dict, cost: dict, meta: dict) 
         f"# Single vs Multi agent 비교 결과 ({meta['label']})",
         "",
         f"- 측정 시각: {meta['started']}",
-        f"- 쿼리 {meta['queries']}개 x {meta['runs']}회, 쿼리마다 후보 5편과 가중치 고정",
+        f"- 쿼리 {meta['queries']}개 (세트: {meta.get('query_set', 'base')}) x {meta['runs']}회, 쿼리마다 후보 5편과 가중치 고정",
         SINGLE_MODE_NOTES[meta.get("single_mode", "score")],
         f"- 평가 temperature: {meta['eval_temperature']}, 소요 시간: {meta['elapsed_min']:.1f}분",
         "",
@@ -362,7 +376,8 @@ async def run(args) -> None:
     single_agent_service.call_luxia = metered(single_agent_service.call_luxia)
 
     single_mode = getattr(args, "single_mode", "full")
-    queries = DEFAULT_QUERIES[: args.queries]
+    query_set = QUERY_SETS[getattr(args, "query_set", "base")]
+    queries = query_set[: args.queries] if args.queries else query_set
     out_dir = Path(args.out_dir) if args.out_dir else BACKEND_DIR / "scripts" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
     base = out_dir / f"compare_{args.label}_{datetime.now().strftime('%Y%m%d_%H%M')}"
@@ -449,6 +464,7 @@ async def run(args) -> None:
         "label": args.label, "started": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "queries": len(queries), "runs": args.runs, "eval_temperature": agent_service.EVAL_TEMPERATURE,
         "elapsed_min": (time.perf_counter() - started) / 60, "single_mode": single_mode,
+        "query_set": getattr(args, "query_set", "base"),
     }
     report = to_markdown(compare_modes(rows["multi"], rows["single"]),
                          {m: summarize(rows[m]) for m in MODES}, summarize_cost(run_rows), meta)
@@ -468,7 +484,9 @@ async def run(args) -> None:
 def main_cli() -> None:
     parser = argparse.ArgumentParser(description="Single vs Multi agent 비교")
     parser.add_argument("--runs", type=int, default=3, help="쿼리마다 반복 횟수 (기본 3, 일관성 비교는 2 이상)")
-    parser.add_argument("--queries", type=int, default=len(DEFAULT_QUERIES), help="사용할 쿼리 수 (최대 5)")
+    parser.add_argument("--query-set", choices=list(QUERY_SETS), default="base",
+                        help="base: 실험 쿼리 5개 (기본) / new: 추가 쿼리 5개 / all: 10개")
+    parser.add_argument("--queries", type=int, default=0, help="세트 앞에서부터 사용할 쿼리 수 (0 = 전부)")
     parser.add_argument("--label", default="main", help="결과 파일 이름에 붙일 이름")
     parser.add_argument("--out-dir", default="", help="결과 저장 폴더 (기본 scripts/results)")
     parser.add_argument("--survey-run", type=int, default=1, help="설문 자료로 쓸 회차 (기본 1)")
@@ -481,8 +499,9 @@ def main_cli() -> None:
     if not 1 <= args.survey_run <= args.runs:
         parser.error("--survey-run은 1 이상 --runs 이하여야 합니다.")
 
-    calls = args.queries * (2 + args.runs * (40 if args.single_mode == "full" else 35))
-    print(f"쿼리 {args.queries}개 x {args.runs}회, LLM 호출 약 {calls}회")
+    n = len(QUERY_SETS[args.query_set][: args.queries] if args.queries else QUERY_SETS[args.query_set])
+    calls = n * (2 + args.runs * (40 if args.single_mode == "full" else 35))
+    print(f"쿼리 {n}개 ({args.query_set}) x {args.runs}회, LLM 호출 약 {calls}회")
     asyncio.run(run(args))
 
 

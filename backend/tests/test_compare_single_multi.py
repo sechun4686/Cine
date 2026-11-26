@@ -162,9 +162,10 @@ def test_full_run_single_selects_its_own_tools(monkeypatch, tmp_path):
     monkeypatch.setenv("TMDB_API_KEY", "t")
     monkeypatch.setenv("LUXIA_API_KEY", "l")
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
-    single_selects, single_evals, single_tool_runs = [], [], []
+    single_selects, single_evals, single_tool_runs, pool_queries = [], [], [], []
 
     async def fake_pool(client, request, info=None):
+        pool_queries.append(request.query)
         return [{"id": i, "media_type": "movie", "title": f"m{i}", "overview": "o"} for i in range(5)]
 
     async def fake_weights(client, query):
@@ -204,7 +205,9 @@ def test_full_run_single_selects_its_own_tools(monkeypatch, tmp_path):
     monkeypatch.setattr(single_agent_service, "call_luxia", fake_call)
 
     asyncio.run(cmp.run(Namespace(runs=1, queries=1, label="f", out_dir=str(tmp_path), survey_run=1, seed=0,
-                                  single_mode="full")))
+                                  single_mode="full", query_set="new")))
+
+    assert pool_queries == [cmp.NEW_QUERIES[0]["query"]]          # 추가 쿼리 세트에서 실행
 
     assert len(single_selects) == 5 and len(single_evals) == 5
     # single이 고른 도구 + 관점별 필수·기본 도구로 검증된 목록만 실행한다
@@ -219,3 +222,15 @@ def test_full_run_single_selects_its_own_tools(monkeypatch, tmp_path):
     assert {(r["mode"], r["llm_calls"]) for r in rows} == {("multi", "30"), ("single", "10")}
     md = next(p for p in tmp_path.glob("*.md") if not p.name.endswith("_survey.md")).read_text(encoding="utf-8")
     assert "single(full)" in md and "두 방식 모두 TMDB 상세정보 조회" in md
+    assert "세트: new" in md
+
+
+def test_query_sets():
+    assert len(cmp.QUERY_SETS["base"]) == 5 and len(cmp.QUERY_SETS["new"]) == 5
+    assert cmp.QUERY_SETS["all"] == cmp.QUERY_SETS["base"] + cmp.QUERY_SETS["new"]
+    base = {q["query"] for q in cmp.QUERY_SETS["base"]}
+    assert not base & {q["query"] for q in cmp.QUERY_SETS["new"]}     # 겹치는 쿼리 없음
+    for q in cmp.NEW_QUERIES:
+        assert q["media"] and set(q["media"]) <= {"movie", "tv", "animation"}
+        main_req = __import__("main").RecommendRequest(query=q["query"], media=q["media"], ott=q["ott"])
+        assert main_req.query == q["query"]

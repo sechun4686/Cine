@@ -52,7 +52,15 @@ python scripts/weight_sensitivity.py scripts/results/reproducibility_t02-free_*_
 python scripts/compare_single_multi.py --runs 1 --queries 1 --label check        # 동작 확인 (LLM 약 50회)
 python scripts/compare_single_multi.py --runs 3 --label full                      # 본 실험 (LLM 약 610회)
 python scripts/compare_single_multi.py --runs 3 --label score --single-mode score # 보조 분석 (LLM 약 535회)
+python scripts/compare_single_multi.py --runs 3 --label full-new --query-set new  # 추가 쿼리 5개 (설문 B형)
 ```
+
+쿼리 세트 (`--query-set`)
+- `base` (기본): 실험 1과 같은 쿼리 5개 → 설문 A형
+- `new`: 추가 쿼리 5개 → 설문 B형. 상황(비 오는 날, 주말 정주행), 대상(친구), 제외 조건(잔인하지 않은 공포), 주제(SF)로 범위를 넓혔고, 결과를 보기 전에 정했다
+- `all`: 10개를 한 번에
+
+설문은 A형(base)과 B형(new)으로 나눠 참가자 번호 홀짝으로 배정한다. 참가자 1명은 5문항만 답한다.
 
 쿼리마다 후보 5편과 가중치를 한 번만 정해 고정하고, 회차마다 multi → single 순서로 평가한다.
 평가 기준 문구·점수 기준·가중치 계산·temperature는 두 방식이 같다.
