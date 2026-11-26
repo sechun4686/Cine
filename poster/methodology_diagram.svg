@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="690" viewBox="0 0 1700 690" font-family="Inter, 'Noto Sans', Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2B3A4A"/>
+    </marker>
+    <marker id="ahb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4A7FC1"/>
+    </marker>
+    <marker id="aht" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3A9A8F"/>
+    </marker>
+  </defs>
+
+  <rect width="1700" height="690" fill="#FFFFFF"/>
+
+  <!-- ============ MAIN PIPELINE ============ -->
+  <!-- 1. User Request -->
+  <g>
+    <rect x="30" y="140" width="200" height="120" rx="14" fill="#EEF3F9" stroke="#9FB6D3" stroke-width="2"/>
+    <text x="130" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#6B7C90" letter-spacing="1.5">INPUT</text>
+    <text x="130" y="200" text-anchor="middle" font-size="23" font-weight="700" fill="#1F2D3D">User Request</text>
+    <text x="130" y="230" text-anchor="middle" font-size="16" fill="#3E4C5C">filters + free text</text>
+  </g>
+
+  <!-- 2. Query Structuring -->
+  <g>
+    <rect x="290" y="140" width="240" height="120" rx="14" fill="#FDF1DC" stroke="#E2BE85" stroke-width="2"/>
+    <text x="410" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#9A7440" letter-spacing="1.5">LEAD EDITOR</text>
+    <text x="410" y="198" text-anchor="middle" font-size="23" font-weight="700" fill="#1F2D3D">Query Structuring</text>
+    <text x="410" y="224" text-anchor="middle" font-size="16" fill="#3E4C5C">include / exclude genres</text>
+    <text x="410" y="246" text-anchor="middle" font-size="16" fill="#3E4C5C">view importance 0–5</text>
+  </g>
+
+  <!-- 3. Candidate Retrieval -->
+  <g>
+    <rect x="590" y="140" width="240" height="120" rx="14" fill="#EEF3F9" stroke="#9FB6D3" stroke-width="2"/>
+    <text x="710" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#6B7C90" letter-spacing="1.5">RETRIEVAL</text>
+    <text x="710" y="198" text-anchor="middle" font-size="23" font-weight="700" fill="#1F2D3D">Candidates</text>
+    <text x="710" y="224" text-anchor="middle" font-size="16" fill="#3E4C5C">TMDB, 5 strategies</text>
+    <text x="710" y="246" text-anchor="middle" font-size="16" fill="#3E4C5C">→ 5 diverse titles</text>
+  </g>
+
+  <!-- 4. Multi-agent evaluation group -->
+  <g>
+    <rect x="890" y="52" width="270" height="296" rx="16" fill="#F4F7FB" stroke="#4A7FC1" stroke-width="2.5"/>
+    <text x="1025" y="80" text-anchor="middle" font-size="13" font-weight="600" fill="#4A7FC1" letter-spacing="1.5">PARALLEL CRITICS · LANGGRAPH</text>
+
+    <rect x="910" y="96" width="230" height="70" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <rect x="910" y="96" width="9" height="70" rx="3" fill="#1F4E8C"/>
+    <text x="934" y="126" font-size="20" font-weight="700" fill="#1F2D3D">Technical</text>
+    <text x="934" y="150" font-size="14.5" fill="#4E5D6E">director · studio · cast</text>
+
+    <rect x="910" y="178" width="230" height="70" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <rect x="910" y="178" width="9" height="70" rx="3" fill="#4A90C2"/>
+    <text x="934" y="208" font-size="20" font-weight="700" fill="#1F2D3D">Narrative</text>
+    <text x="934" y="232" font-size="14.5" fill="#4E5D6E">plot · characters · themes</text>
+
+    <rect x="910" y="260" width="230" height="70" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <rect x="910" y="260" width="9" height="70" rx="3" fill="#3A9A8F"/>
+    <text x="934" y="290" font-size="20" font-weight="700" fill="#1F2D3D">Public</text>
+    <text x="934" y="314" font-size="14.5" fill="#4E5D6E">votes · popularity · reviews</text>
+  </g>
+
+  <!-- 5. Synthesis -->
+  <g>
+    <rect x="1220" y="140" width="210" height="120" rx="14" fill="#FDF1DC" stroke="#E2BE85" stroke-width="2"/>
+    <text x="1325" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#9A7440" letter-spacing="1.5">LEAD EDITOR</text>
+    <text x="1325" y="200" text-anchor="middle" font-size="23" font-weight="700" fill="#1F2D3D">Synthesis</text>
+    <text x="1325" y="230" text-anchor="middle" font-size="17" fill="#3E4C5C">Final = Σ wᵢ · scoreᵢ</text>
+  </g>
+
+  <!-- 6. Explained Result -->
+  <g>
+    <rect x="1490" y="140" width="190" height="120" rx="14" fill="#E2F2F0" stroke="#7CC2B9" stroke-width="2"/>
+    <text x="1585" y="168" text-anchor="middle" font-size="13" font-weight="600" fill="#3A8C82" letter-spacing="1.5">OUTPUT</text>
+    <text x="1585" y="200" text-anchor="middle" font-size="22" font-weight="700" fill="#1F2D3D">Explained</text>
+    <text x="1585" y="226" text-anchor="middle" font-size="22" font-weight="700" fill="#1F2D3D">Result</text>
+    <text x="1585" y="250" text-anchor="middle" font-size="14.5" fill="#3E4C5C">top pick · radar · reasons</text>
+  </g>
+
+  <!-- main arrows -->
+  <g stroke="#2B3A4A" stroke-width="3" fill="none" marker-end="url(#ah)">
+    <line x1="232" y1="200" x2="286" y2="200"/>
+    <line x1="532" y1="200" x2="586" y2="200"/>
+    <line x1="832" y1="200" x2="886" y2="200"/>
+    <line x1="1162" y1="200" x2="1216" y2="200"/>
+    <line x1="1432" y1="200" x2="1486" y2="200"/>
+  </g>
+
+  <!-- weights path: Query Structuring -> Synthesis -->
+  <path d="M410,262 V384 H1325 V264" stroke="#4A7FC1" stroke-width="2.5" fill="none" stroke-dasharray="9 6" marker-end="url(#ahb)"/>
+  <rect x="545" y="370" width="410" height="28" fill="#FFFFFF"/>
+  <text x="750" y="390" text-anchor="middle" font-size="16.5" font-weight="600" fill="#4A7FC1">weights wᵢ = softmax(importanceᵢ / τ), τ = 1.5</text>
+
+  <!-- feedback loop: Result -> Request -->
+  <path d="M1585,262 V432 H130 V264" stroke="#3A9A8F" stroke-width="2.5" fill="none" marker-end="url(#aht)"/>
+  <rect x="420" y="418" width="600" height="28" fill="#FFFFFF"/>
+  <text x="720" y="438" text-anchor="middle" font-size="16.5" font-weight="600" fill="#3A9A8F">Feedback: “Already watched” · “Not interested” · “Recommend again”</text>
+
+  <!-- ============ INSET: inside one critic ============ -->
+  <!-- connector -->
+  <path d="M1025,350 V500" stroke="#8A9AAD" stroke-width="2" fill="none" stroke-dasharray="4 5"/>
+  <circle cx="1025" cy="350" r="4" fill="#8A9AAD"/>
+
+  <rect x="300" y="500" width="1100" height="170" rx="16" fill="#FAFBFD" stroke="#8A9AAD" stroke-width="1.8" stroke-dasharray="7 5"/>
+  <text x="324" y="530" font-size="15" font-weight="700" fill="#5A6A7D" letter-spacing="1.2">INSIDE EACH CRITIC AGENT</text>
+
+  <g>
+    <rect x="330" y="548" width="230" height="98" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <text x="445" y="582" text-anchor="middle" font-size="19" font-weight="700" fill="#1F2D3D">① Select tools</text>
+    <text x="445" y="608" text-anchor="middle" font-size="14.5" fill="#4E5D6E">LLM picks 2–4 of</text>
+    <text x="445" y="628" text-anchor="middle" font-size="14.5" fill="#4E5D6E">its own TMDB tools</text>
+
+    <rect x="600" y="548" width="230" height="98" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <text x="715" y="582" text-anchor="middle" font-size="19" font-weight="700" fill="#1F2D3D">② Validate</text>
+    <text x="715" y="608" text-anchor="middle" font-size="14.5" fill="#4E5D6E">code keeps only tools</text>
+    <text x="715" y="628" text-anchor="middle" font-size="14.5" fill="#4E5D6E">allowed for the agent</text>
+
+    <rect x="870" y="548" width="230" height="98" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <text x="985" y="582" text-anchor="middle" font-size="19" font-weight="700" fill="#1F2D3D">③ Fetch evidence</text>
+    <text x="985" y="608" text-anchor="middle" font-size="14.5" fill="#4E5D6E">call TMDB API for</text>
+    <text x="985" y="628" text-anchor="middle" font-size="14.5" fill="#4E5D6E">the selected data</text>
+
+    <rect x="1140" y="548" width="230" height="98" rx="10" fill="#FFFFFF" stroke="#C9D6E6" stroke-width="1.5"/>
+    <text x="1255" y="582" text-anchor="middle" font-size="19" font-weight="700" fill="#1F2D3D">④ Score + reason</text>
+    <text x="1255" y="608" text-anchor="middle" font-size="14.5" fill="#4E5D6E">0–10 score, rationale</text>
+    <text x="1255" y="628" text-anchor="middle" font-size="14.5" fill="#4E5D6E">citing only that data</text>
+  </g>
+  <g stroke="#2B3A4A" stroke-width="2.5" fill="none" marker-end="url(#ah)">
+    <line x1="562" y1="597" x2="596" y2="597"/>
+    <line x1="832" y1="597" x2="866" y2="597"/>
+    <line x1="1102" y1="597" x2="1136" y2="597"/>
+  </g>
+</svg>
