@@ -168,6 +168,7 @@ async def search_tmdb(
 #   5) Lead Editor 총평                  editor_service.build_editor_prompt
 # ------------------------------------------------------------------
 POOL_SIZE = 60          # 전체 후보군 크기 (매체가 여러 개면 나눠서 수집)
+MIN_POOL_PER_MEDIA = 10  # 매체별 후보가 이보다 적으면 장르 조건을 풀어 보충한다 (후보 선별은 최소 10편에서 고른다)
 OTHERS_COUNT = 4        # best 외에 함께 보여줄 후보 수 (재추천 후보로도 쓰므로 평가한 후보를 모두 보낸다)
 
 
@@ -197,7 +198,8 @@ async def _fetch_pool(client: httpx.AsyncClient, request: RecommendRequest, info
     검색어가 있으면 Query Structuring으로 포함/제외 장르를 정한다 (info["query_structure"]에 기록).
         포함 장르: 사용자가 장르를 고르지 않았을 때만 쓴다
         제외 장르: 항상 쓰되, 사용자가 직접 고른 장르는 빼지 않는다
-    조건 때문에 결과가 비면 포함 장르 -> 제외 장르 순서로 조건을 풀어 다시 찾는다.
+    조건 때문에 후보가 MIN_POOL_PER_MEDIA편보다 적으면 포함 장르 -> 제외 장르 순서로 조건을 풀어 보충한다
+    (조건에 맞는 작품이 앞에 오고, 완화해서 찾은 작품은 뒤에 붙는다).
     """
     structure = await structure_query(client, combine_query(request.query, request.refinements))
     if info is not None:
@@ -217,16 +219,20 @@ async def _fetch_pool(client: httpx.AsyncClient, request: RecommendRequest, info
         if excluded:
             attempts.append(([], []))
 
+        # 조건에 맞는 작품을 먼저 담고, MIN_POOL_PER_MEDIA편이 안 되면 조건을 풀어 나머지를 채운다
+        collected: dict = {}
         for i, (g, ex) in enumerate(attempts):
             if i:
-                print(f"[recommend] {media_type} 조건 결과 없음 -> 조건 완화 후 재검색 (포함 {g}, 제외 {ex})")
+                print(f"[recommend] {media_type} 후보 {len(collected)}편 -> 조건 완화 후 보충 (포함 {g}, 제외 {ex})")
             pool = await fetch_filtered_pool(
                 client, media_type, g, request.ott, request.runtime, target_count=per_media,
                 required_genres=required, exclude_genres=ex,
             )
-            if pool:
-                return pool
-        return []
+            for item in pool:
+                collected.setdefault(item["id"], item)
+            if len(collected) >= MIN_POOL_PER_MEDIA:
+                break
+        return list(collected.values())
 
     results = await asyncio.gather(*(fetch_one(m, g, r) for m, g, r in targets))
 

@@ -84,10 +84,28 @@ GENRE_MAP = MOVIE_GENRES   # 예전 이름 호환용 (화면의 장르 목록 = 
 TV_EXCLUDED_GENRES = [10764, 10767, 10763]
 
 
-def genre_ids(names: list[str], media_type: str) -> list[int]:
-    """장르 이름 -> 매체에 맞는 TMDB 장르 번호 (없는 장르는 빼고, 중복 제거)"""
+# TV에 없는 장르를 포함 조건으로 쓸 때 대신 찾을 TV 장르
+# (없으면 장르 조건이 통째로 빠져 요청과 무관한 인기 TV가 후보군에 들어온다)
+# 제외 조건에는 쓰지 않는다: 힐링 요청에서 '로맨스'를 빼려다 드라마 전체가 빠질 수 있다
+TV_GENRE_FALLBACK = {
+    "공포": "미스터리",
+    "스릴러": "미스터리",
+    "로맨스": "드라마",
+}
+
+
+def genre_ids(names: list[str], media_type: str, fallback: bool = False) -> list[int]:
+    """
+    장르 이름 -> 매체에 맞는 TMDB 장르 번호 (없는 장르는 빼고, 중복 제거)
+    fallback: True면 TV에 없는 장르를 TV_GENRE_FALLBACK의 비슷한 장르로 바꿔 찾는다 (포함 조건용)
+    """
     table = TV_GENRES if media_type == "tv" else MOVIE_GENRES
-    ids = [table.get(n) for n in names]
+    ids = []
+    for n in names:
+        i = table.get(n)
+        if i is None and fallback and media_type == "tv":
+            i = table.get(TV_GENRE_FALLBACK.get(n, ""))
+        ids.append(i)
     return list(dict.fromkeys(i for i in ids if i))
 
 
@@ -116,12 +134,13 @@ async def fetch_filtered_pool(
     사용자 조건으로 TMDB 후보를 필터링해 수집한다.
 
     genres          : 이 중 하나라도 해당하면 된다 (OR). 화면에서 여러 장르를 고른 경우
+                      TV에 없는 장르(공포·스릴러·로맨스)는 비슷한 TV 장르로 바꿔 찾는다
     required_genres : 반드시 해당해야 한다 (AND). 예: 애니메이션 매체를 고른 경우 '애니메이션'
     exclude_genres  : 하나라도 해당하면 뺀다. 예: 힐링 요청이면 범죄·공포
     TMDB는 AND와 OR을 한 조건에 섞을 수 없어서, 둘 다 있으면 required는 API로 걸고
     genres는 받아온 결과에서 거른다.
     """
-    any_ids = genre_ids(genres, media_type)
+    any_ids = genre_ids(genres, media_type, fallback=True)
     all_ids = genre_ids(required_genres or [], media_type)
     # 포함·필수 장르와 겹치는 제외 장르는 쓰지 않는다 (TV는 액션·모험처럼 한 번호를 나눠 쓰기도 한다)
     none_ids = [i for i in genre_ids(exclude_genres or [], media_type) if i not in any_ids + all_ids]
