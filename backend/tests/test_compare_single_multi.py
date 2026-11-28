@@ -234,3 +234,28 @@ def test_query_sets():
         assert q["media"] and set(q["media"]) <= {"movie", "tv", "animation"}
         main_req = __import__("main").RecommendRequest(query=q["query"], media=q["media"], ott=q["ott"])
         assert main_req.query == q["query"]
+
+
+def test_view_correlation_detects_halo_effect():
+    def rows(scores_by_item):
+        out = []
+        for i, (t, n, p) in enumerate(scores_by_item):
+            for agent, sc in (("technical", t), ("narrative", n), ("public", p)):
+                out.append({"query": "q", "run": 1, "item_key": f"movie:{i}", "rank": i + 1,
+                            "agent": agent, "score": sc})
+        return out
+
+    # single: 세 관점이 같이 움직임 (후광 효과) / multi: 관점마다 따로 움직임
+    single = rows([(8, 8, 8), (6, 6, 6), (4, 4, 5), (7, 7, 7)])
+    multi = rows([(8, 4, 6), (6, 8, 5), (4, 6, 8), (7, 5, 4)])
+    vc_single = cmp.view_correlation(single)
+    vc_multi = cmp.view_correlation(multi)
+    assert vc_single["mean"] > 0.9
+    assert vc_multi["mean"] < vc_single["mean"]
+    assert cmp.compare_modes(multi, single)["view_corr"]["single"]["mean"] == vc_single["mean"]
+
+
+def test_view_correlation_needs_three_items():
+    rows = [{"query": "q", "run": 1, "item_key": "movie:1", "agent": a, "score": 5}
+            for a in ("technical", "narrative", "public")]
+    assert cmp.view_correlation(rows)["mean"] is None

@@ -65,3 +65,24 @@ async def test_evaluate_candidates_drops_fully_failed_and_ranks(monkeypatch):
     assert ranked[0]["failed_agents"] == ["public"]
     assert ranked[0]["final_score"] == 8.0
     assert ranked[1]["failed_agents"] == []
+
+
+def test_validate_tools_always_keeps_two_core_tools():
+    import json
+    from services.agent_tools import MAX_TOOLS, REQUIRED_TOOLS, validate_tools
+    for agent, core in REQUIRED_TOOLS.items():
+        assert len(core) == 2
+        plan = validate_tools(agent, json.dumps({"tools": [], "reason": "추가 없음"}))
+        assert plan["tools"][:2] == core and len(plan["tools"]) <= MAX_TOOLS
+
+
+def test_prompts_keep_each_view_to_its_own_criteria():
+    from services.agent_prompts import build_prompt, build_select_prompt, build_single_prompt
+    cand = {"title": "A작품", "media_type": "movie", "overview": "줄거리"}
+    for agent in ("technical", "narrative", "public"):
+        prompt = build_prompt(cand, "힐링 영화", agent, {})
+        assert "[이 관점의 점수 기준]" in prompt
+        assert "다른 관점이 판단하는 요소" in prompt
+        assert "핵심 도구" in build_select_prompt(cand, "힐링 영화", agent)
+    single = build_single_prompt(cand, "힐링 영화", {"technical": {}, "narrative": {}, "public": {}})
+    assert single.count("[이 관점의 점수 기준]\n점수는") == 3   # single-agent도 같은 관점별 기준을 받는다

@@ -106,6 +106,40 @@ def _scores(rows: list[dict], query: str, run: int) -> dict:
             for r in rows if r["query"] == query and r["run"] == run}
 
 
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 3:
+        return None
+    mx, my = statistics.mean(xs), statistics.mean(ys)
+    sx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    sy = sum((y - my) ** 2 for y in ys) ** 0.5
+    if sx == 0 or sy == 0:
+        return None
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy)
+
+
+VIEW_PAIRS = [("technical", "narrative"), ("technical", "public"), ("narrative", "public")]
+
+
+def view_correlation(rows: list[dict]) -> dict:
+    """
+    관점 간 점수 상관 (후광 효과 지표).
+    같은 (쿼리, 회차, 작품)에 매긴 두 관점 점수를 짝지어 피어슨 상관을 낸다.
+    상관이 높을수록 한 관점이 좋으면 다른 관점도 좋게 주는 경향(관점이 분리되지 않음)이 강하다.
+    return: {"technical-narrative": r, "technical-public": r, "narrative-public": r, "mean": 평균 r}
+    """
+    by_item: dict[tuple, dict] = {}
+    for r in rows:
+        if r.get("score") is not None:
+            by_item.setdefault((r["query"], r["run"], r["item_key"]), {})[r["agent"]] = r["score"]
+    out = {}
+    for a, b in VIEW_PAIRS:
+        pairs = [(v[a], v[b]) for v in by_item.values() if a in v and b in v]
+        out[f"{a}-{b}"] = _pearson([x for x, _ in pairs], [y for _, y in pairs])
+    valid = [v for v in out.values() if v is not None]
+    out["mean"] = _mean(valid)
+    return out
+
+
 def compare_modes(multi_rows: list[dict], single_rows: list[dict]) -> dict:
     """
     같은 회차의 multi / single 결과를 짝지어 비교한다.
@@ -113,6 +147,7 @@ def compare_modes(multi_rows: list[dict], single_rows: list[dict]) -> dict:
         per_query : 쿼리별 {pairs, top1_match, rank_tau}
         per_agent : 관점별 {mean_diff (single - multi), mean_abs_diff, spread (방식별 후보 간 표준편차)}
         overall   : {top1_match, rank_tau}
+        view_corr : 방식별 관점 간 점수 상관 {multi: {...}, single: {...}} (view_correlation)
     """
     queries = list(dict.fromkeys(r["query"] for r in multi_rows))
     per_query, all_match, all_tau = {}, [], []
@@ -159,7 +194,8 @@ def compare_modes(multi_rows: list[dict], single_rows: list[dict]) -> dict:
         for a in AGENT_TYPES
     }
     overall = {"top1_match": _mean([float(m) for m in all_match]), "rank_tau": _mean(all_tau)}
-    return {"per_query": per_query, "per_agent": per_agent, "overall": overall}
+    view_corr = {"multi": view_correlation(multi_rows), "single": view_correlation(single_rows)}
+    return {"per_query": per_query, "per_agent": per_agent, "overall": overall, "view_corr": view_corr}
 
 
 def summarize_cost(run_rows: list[dict]) -> dict:
@@ -252,6 +288,24 @@ def to_markdown(comparison: dict, mode_summaries: dict, cost: dict, meta: dict) 
     for a, s in comparison["per_agent"].items():
         lines.append(f"| {AGENT_LABELS[a]} | {fmt(s['mean_diff'])} | {fmt(s['mean_abs_diff'])} | "
                      f"{fmt(s['spread']['multi'])} | {fmt(s['spread']['single'])} |")
+
+    vc = comparison.get("view_corr") or {}
+    if vc:
+        lines += [
+            "",
+            "### 관점 간 점수 상관 (후광 효과)",
+            "",
+            "같은 작품에 매긴 두 관점 점수의 피어슨 상관. 낮을수록 관점을 서로 독립적으로 판단한다는 뜻 "
+            "(한 관점이 좋으면 나머지도 좋게 주는 후광 효과가 약함).",
+            "",
+            "| 관점 쌍 | multi | single |",
+            "|---|---|---|",
+        ]
+        for a, b in VIEW_PAIRS:
+            key = f"{a}-{b}"
+            lines.append(f"| {AGENT_LABELS[a]} – {AGENT_LABELS[b]} | {fmt(vc['multi'].get(key))} | "
+                         f"{fmt(vc['single'].get(key))} |")
+        lines.append(f"| **평균** | **{fmt(vc['multi'].get('mean'))}** | **{fmt(vc['single'].get('mean'))}** |")
 
     lines += [
         "",

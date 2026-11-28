@@ -35,7 +35,7 @@ async def test_evaluate_candidates_emits_agent_progress(monkeypatch):
             phases = [e["phase"] for e in agent_events if e["agent"] == agent and e["index"] == index]
             assert phases == ["tools_selected", "data_ready", "scored"]
     selected = next(e for e in agent_events if e["phase"] == "tools_selected" and e["agent"] == "technical")
-    assert selected["tools"] == ["감독", "주요 출연진"]   # 선택 실패 -> 기본 도구 라벨
+    assert selected["tools"] == ["감독", "감독 필모그래피"]   # 선택 실패 -> 기본(핵심) 도구 라벨
 
 
 async def test_progress_callback_error_does_not_break_evaluation(monkeypatch):

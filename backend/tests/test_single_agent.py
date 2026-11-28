@@ -131,11 +131,11 @@ def test_validate_single_tools_uses_multi_rules_per_perspective():
     plans = single.validate_single_tools(
         '{"tools": ["cast", "director", "budget_revenue", "runtime", "production_companies", '
         '"keywords", "없는도구", "vote_stats", "popularity"], "reason": "이유"}')
-    # 관점마다 필수 도구를 맨 앞에, 최대 4개
-    assert plans["technical"]["tools"] == ["director", "cast", "budget_revenue", "runtime"]
-    # 서사는 keywords만 골랐으므로 필수 overview_full 추가
+    # 관점마다 핵심 도구 2개를 맨 앞에, 최대 4개
+    assert plans["technical"]["tools"] == ["director", "director_filmography", "cast", "budget_revenue"]
+    # 서사는 keywords만 골랐으므로 핵심 overview_full 추가
     assert plans["narrative"]["tools"] == ["overview_full", "keywords"]
-    assert plans["public"]["tools"] == ["vote_stats", "popularity"]
+    assert plans["public"]["tools"] == ["vote_stats", "reviews", "popularity"]
     assert all(p["reason"] == "이유" for p in plans.values())
     assert "없는도구" in plans["public"]["rejected"]
 
@@ -153,7 +153,7 @@ def test_single_select_prompt_lists_all_tools():
     for a in ("technical", "narrative", "public"):
         for name in TOOL_REGISTRY[a]:
             assert f"- {name}:" in prompt
-    assert "세 관점마다 그 관점의 도구를 2개 이상 4개 이하로" in prompt and "드라마" in prompt
+    assert "관점마다 핵심 도구는 항상 포함돼" in prompt and "0~2개를 더 골라" in prompt and "드라마" in prompt
 
 
 async def test_tool_data_list_and_select_tools_are_exclusive():

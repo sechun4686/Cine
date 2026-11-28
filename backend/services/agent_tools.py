@@ -240,19 +240,18 @@ TOOL_REGISTRY = {
     },
 }
 
-# 항상 포함되는 도구 (평가 관점의 핵심 데이터)
+# 항상 포함되는 핵심 도구 (평가 관점마다 2개)
+# 에이전트는 이 2개에 더해 0~2개를 스스로 고른다.
+# 재현성 실험에서 점수 편차의 약 절반이 '어떤 데이터를 보느냐(도구 선택)'에서 나와서,
+# 관점 판단에 꼭 필요한 데이터는 항상 보게 하고 자율 선택은 보조 데이터에만 남겼다.
 REQUIRED_TOOLS = {
-    "technical": ["director"],
-    "narrative": ["overview_full"],
-    "public": ["vote_stats"],
+    "technical": ["director", "director_filmography"],
+    "narrative": ["overview_full", "keywords"],
+    "public": ["vote_stats", "reviews"],
 }
 
-# 선택이 실패했을 때 쓰는 기본 도구 (기존 고정 필드 구성과 동일한 범위)
-DEFAULT_TOOLS = {
-    "technical": ["director", "cast"],
-    "narrative": ["overview_full", "keywords"],
-    "public": ["vote_stats", "release_year"],
-}
+# 선택이 실패했을 때 쓰는 기본 도구 (= 핵심 도구)
+DEFAULT_TOOLS = {agent: list(tools) for agent, tools in REQUIRED_TOOLS.items()}
 
 
 # ------------------------------------------------------------------
