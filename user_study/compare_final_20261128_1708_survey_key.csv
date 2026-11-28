@@ -1,0 +1,11 @@
+﻿question,query,A,B,same_title,A_title,B_title
+1,지친 하루 끝에 보기 좋은 잔잔하고 따뜻한 힐링 영화,single,multi,False,아쿠아리움이 문을 닫으면,퍼펙트 데이즈
+2,마지막에 반전이 있는 긴장감 넘치는 스릴러,single,multi,True,나우 유 씨 미 2,나우 유 씨 미 2
+3,가족이랑 같이 웃으면서 볼 수 있는 애니메이션,multi,single,False,토이 스토리 5,이웃집 토토로
+4,실화를 바탕으로 한 감동적인 이야기,single,multi,False,소셜 레코닝,허리케인을 거슬러
+5,연출과 영상미가 뛰어난 작품성 있는 드라마,multi,single,True,시카고 파이어,시카고 파이어
+6,비 오는 날 혼자 보기 좋은 잔잔한 로맨스,multi,single,False,음성메시지가 도착했습니다,타오르는 여인의 초상
+7,친구들이랑 웃으면서 가볍게 볼 코미디,multi,single,True,토이 스토리 5,토이 스토리 5
+8,주말에 정주행하기 좋은 몰입감 있는 범죄 수사 드라마,multi,single,True,마인드헌터,마인드헌터
+9,무섭지만 너무 잔인하지는 않은 공포 영화,single,multi,False,클레이페이스,폴2: 데드포인트
+10,생각할 거리를 주는 SF 영화,single,multi,True,에이리언,에이리언
