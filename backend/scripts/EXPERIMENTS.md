@@ -45,3 +45,45 @@ python scripts/weight_sensitivity.py scripts/results/reproducibility_t02-free_*_
 
 서비스와 같은 조건(t02-free) 결과를 기본으로 쓰고, 여러 CSV를 한 번에 넣으면 합쳐서 분석한다.
 사용자 테스트 후에는 Supabase 로그(`db/analysis.sql` 5번)로도 같은 분석을 할 수 있다.
+
+## 실험 4. Single vs Multi agent 비교
+
+```bash
+python scripts/compare_single_multi.py --runs 1 --queries 1 --label check        # 동작 확인 (LLM 약 50회)
+python scripts/compare_single_multi.py --runs 3 --label full                      # 본 실험 (LLM 약 610회)
+python scripts/compare_single_multi.py --runs 3 --label score --single-mode score # 보조 분석 (LLM 약 535회)
+python scripts/compare_single_multi.py --runs 3 --label full-new --query-set new  # 추가 쿼리 5개 (설문 B형)
+```
+
+쿼리 세트 (`--query-set`)
+- `base` (기본): 실험 1과 같은 쿼리 5개 → 설문 A형
+- `new`: 추가 쿼리 5개 → 설문 B형. 상황(비 오는 날, 주말 정주행), 대상(친구), 제외 조건(잔인하지 않은 공포), 주제(SF)로 범위를 넓혔고, 결과를 보기 전에 정했다
+- `all`: 10개를 한 번에
+
+설문은 A형(base)과 B형(new)으로 나눠 참가자 번호 홀짝으로 배정한다. 참가자 1명은 5문항만 답한다.
+
+쿼리마다 후보 5편과 가중치를 한 번만 정해 고정하고, 회차마다 multi → single 순서로 평가한다.
+평가 기준 문구·점수 기준·가중치 계산·temperature는 두 방식이 같다.
+
+| single 모드 | 도구 선택 | 채점 | 후보 1편당 LLM 호출 | 비교로 알 수 있는 것 |
+|---|---|---|---|---|
+| multi (기준) | 에이전트 3개가 각자 | 에이전트 3개가 각자 | 6회 | - |
+| **full (기본)** | 에이전트 1개가 14개 도구 중 직접 선택 (관점마다 2~4개, 필수 도구는 multi와 같음) | 1회에 세 관점 | 2회 | **완전한 multi vs single**: 관점을 나눈 구조 전체의 효과 |
+| score | multi가 고른 데이터를 그대로 받음 | 1회에 세 관점 | 1회 | 채점을 나눈 효과만 (도구 선택은 multi와 같음) |
+
+full과 score 결과를 함께 보면 multi의 효과가 도구 선택에서 오는지, 채점에서 오는지 나눠 볼 수 있다.
+코드: `services/single_agent_service.py` (`evaluate_candidates_single(select_tools=True)`가 full 모드)
+
+보고서에 쓸 지표 (`compare_*.md`)
+1. 두 방식의 1위 일치율, 순위 상관(Kendall τ)
+2. 같은 후보에 대한 관점별 점수 차이(single − multi), 후보 간 점수 분산(작품을 얼마나 구분하는지)
+3. 방식별 일관성: 회차 간 점수 표준편차, 1위 일치율, 실패율 (`--runs 2` 이상)
+4. 비용: LLM 호출 수, LLM 응답 시간 합, 전체 소요 시간
+
+설문 자료 (full 모드 결과로 만든다)
+- `compare_*_survey.md`: 쿼리마다 두 방식의 1위 결과를 A/B로 배치 (방식 이름·점수 없음, A/B 위치는 절반씩). 구글 폼에 그대로 옮긴다
+- `compare_*_survey_key.csv`: A/B 정답표. 참가자에게 보여주지 않는다
+- 두 방식 1위가 같은 작품인 문항(`same_title`)은 근거 설명만 비교한다
+
+`compare_*_single_raw.csv`, `compare_*_multi_raw.csv`는 실험 1 원자료와 같은 형식이라
+`weight_sensitivity.py`에 넣어 두 방식의 가중치 민감도도 비교할 수 있다.
