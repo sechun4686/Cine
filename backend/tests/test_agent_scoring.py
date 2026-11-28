@@ -86,3 +86,11 @@ def test_prompts_keep_each_view_to_its_own_criteria():
         assert "핵심 도구" in build_select_prompt(cand, "힐링 영화", agent)
     single = build_single_prompt(cand, "힐링 영화", {"technical": {}, "narrative": {}, "public": {}})
     assert single.count("[이 관점의 점수 기준]\n점수는") == 3   # single-agent도 같은 관점별 기준을 받는다
+
+
+def test_prompts_ask_reason_without_scoring_process():
+    from services.agent_prompts import build_prompt, build_single_prompt
+    cand = {"title": "A작품", "media_type": "movie", "overview": "줄거리"}
+    rule = "채점 과정은 쓰지 말고"
+    assert rule in build_prompt(cand, "힐링", "public", {})
+    assert rule in build_single_prompt(cand, "힐링", {"technical": {}, "narrative": {}, "public": {}})
